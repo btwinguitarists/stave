@@ -16,7 +16,8 @@ public class StaveFolderPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "snapshot", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "writeFile", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "deleteFile", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "pickFolder", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "pickFolder", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "shareNote", returnType: CAPPluginReturnPromise)
     ]
 
     private let bookmarkKey = "stave-folder-bookmark"
@@ -156,6 +157,58 @@ public class StaveFolderPlugin: CAPPlugin, CAPBridgedPlugin {
             } catch {
                 call.reject("bad path: \(rel)")
             }
+        }
+    }
+
+    // MARK: export
+
+    /// Share a page as a Markdown file + rendered PDF via the system sheet.
+    @objc func shareNote(_ call: CAPPluginCall) {
+        let title = call.getString("title") ?? "Stave note"
+        guard let markdown = call.getString("markdown"), let html = call.getString("html") else {
+            call.reject("markdown and html required")
+            return
+        }
+        let safeName = title.replacingOccurrences(of: "/", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = safeName.isEmpty ? "Stave note" : safeName
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("stave-export", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        let mdURL = tmp.appendingPathComponent("\(base).md")
+        let pdfURL = tmp.appendingPathComponent("\(base).pdf")
+        try? markdown.write(to: mdURL, atomically: true, encoding: .utf8)
+
+        DispatchQueue.main.async {
+            // Render the HTML to a paginated PDF (US Letter with margins).
+            let formatter = UIMarkupTextPrintFormatter(markupText: html)
+            let renderer = UIPrintPageRenderer()
+            renderer.addPrintFormatter(formatter, startingAtPageAt: 0)
+            let page = CGRect(x: 0, y: 0, width: 612, height: 792)
+            let printable = page.insetBy(dx: 54, dy: 54)
+            renderer.setValue(page, forKey: "paperRect")
+            renderer.setValue(printable, forKey: "printableRect")
+            let data = NSMutableData()
+            UIGraphicsBeginPDFContextToData(data, page, nil)
+            for i in 0..<max(1, renderer.numberOfPages) {
+                UIGraphicsBeginPDFPage()
+                renderer.drawPage(at: i, in: UIGraphicsGetPDFContextBounds())
+            }
+            UIGraphicsEndPDFContext()
+            data.write(to: pdfURL, atomically: true)
+
+            guard let vc = self.bridge?.viewController else {
+                call.reject("no view controller")
+                return
+            }
+            let sheet = UIActivityViewController(activityItems: [mdURL, pdfURL], applicationActivities: nil)
+            if let pop = sheet.popoverPresentationController {
+                pop.sourceView = vc.view
+                let x = call.getDouble("x").map { CGFloat($0) } ?? vc.view.bounds.midX
+                let y = call.getDouble("y").map { CGFloat($0) } ?? 60
+                pop.sourceRect = CGRect(x: x, y: y, width: 1, height: 1)
+            }
+            sheet.completionWithItemsHandler = { _, _, _, _ in call.resolve() }
+            vc.present(sheet, animated: true)
         }
     }
 

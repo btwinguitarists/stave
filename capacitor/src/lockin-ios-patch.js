@@ -13,6 +13,21 @@
     }
   }
 
+  // Export button — share sheet with the page as .md + rendered PDF.
+  const toolbar = document.getElementById('fmt-toolbar')
+  if (toolbar) {
+    const btn = document.createElement('button')
+    btn.className = 'fmt-btn'
+    btn.id = 'ios-export'
+    btn.textContent = 'export'
+    btn.onclick = e => {
+      const title = (document.getElementById('doc-title') || {}).textContent || 'Stave note'
+      const md = (document.getElementById('editor') || {}).value || ''
+      window.__staveExport(title.trim(), md, e.clientX, e.clientY)
+    }
+    toolbar.appendChild(btn)
+  }
+
   // Touch exit button (Escape on Mac).
   const exit = document.createElement('button')
   exit.id = 'ios-exit'

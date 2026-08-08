@@ -250,6 +250,55 @@ window.require = name => {
   throw new Error('shim: module not available on iOS: ' + name)
 }
 
+// ── export (share sheet with .md + rendered PDF) ──
+function mdToHtml(title, md) {
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const inline = s => esc(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/(^|\W)_([^_]+)_(?=\W|$)/g, '$1<i>$2</i>')
+  const out = []
+  let list = false
+  for (const raw of String(md || '').split('\n')) {
+    const line = raw.trimEnd()
+    const isItem = /^[-•] /.test(line.trim())
+    if (list && !isItem) { out.push('</ul>'); list = false }
+    if (!line.trim()) { out.push('<div class="gap"></div>'); continue }
+    if (/^-{3,}$/.test(line.trim())) { out.push('<hr>'); continue }
+    if (/^## /.test(line)) { out.push(`<h2>${inline(line.slice(3))}</h2>`); continue }
+    if (/^# /.test(line)) { out.push(`<h2>${inline(line.slice(2))}</h2>`); continue }
+    if (/^> /.test(line.trim())) { out.push(`<blockquote>${inline(line.trim().slice(2))}</blockquote>`); continue }
+    if (isItem) {
+      if (!list) { out.push('<ul>'); list = true }
+      out.push(`<li>${inline(line.trim().slice(2))}</li>`)
+      continue
+    }
+    out.push(`<p>${inline(line)}</p>`)
+  }
+  if (list) out.push('</ul>')
+  return `<html><head><meta charset="utf-8"><style>
+    body { font-family: Georgia, serif; font-size: 13pt; line-height: 1.75; color: #222; }
+    h1 { font-size: 17pt; letter-spacing: 0.04em; margin-bottom: 18pt; }
+    h2 { font-size: 14pt; margin: 16pt 0 6pt; }
+    p { margin: 0 0 4pt; } .gap { height: 10pt; }
+    blockquote { margin: 6pt 0 6pt 14pt; padding-left: 10pt; border-left: 2pt solid #b08b3e; color: #555; }
+    ul { margin: 4pt 0 8pt 20pt; } hr { border: none; border-top: 1pt solid #ccc; margin: 14pt 0; }
+  </style></head><body><h1>${esc(title)}</h1>${out.join('\n')}</body></html>`
+}
+
+window.__staveExport = async function (title, markdown, x, y) {
+  const html = mdToHtml(title, markdown)
+  if (StaveNative) {
+    try { await StaveNative.shareNote({ title, markdown, html, x, y }) }
+    catch (e) { console.error('[export] share failed:', e) }
+  } else {
+    const blob = new Blob([markdown], { type: 'text/markdown' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = (title || 'stave-note') + '.md'
+    a.click()
+  }
+}
+
 // Minimal Buffer stand-in (recordings are hidden on iOS; this only prevents
 // a stray reference from throwing at parse/run time).
 if (!window.Buffer) window.Buffer = { from: x => x, isBuffer: () => false }
