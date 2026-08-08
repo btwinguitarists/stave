@@ -12,7 +12,9 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0"),
+        .package(name: "CapacitorActionSheet", path: "../../../node_modules/@capacitor/action-sheet"),
         .package(name: "CapacitorApp", path: "../../../node_modules/@capacitor/app"),
+        .package(name: "CapacitorDialog", path: "../../../node_modules/@capacitor/dialog"),
         .package(name: "StaveFolderPlugin", path: "../../../stave-folder-plugin")
     ],
     targets: [
@@ -21,7 +23,9 @@ let package = Package(
             dependencies: [
                 .product(name: "Capacitor", package: "capacitor-swift-pm"),
                 .product(name: "Cordova", package: "capacitor-swift-pm"),
+                .product(name: "CapacitorActionSheet", package: "CapacitorActionSheet"),
                 .product(name: "CapacitorApp", package: "CapacitorApp"),
+                .product(name: "CapacitorDialog", package: "CapacitorDialog"),
                 .product(name: "StaveFolderPlugin", package: "StaveFolderPlugin")
             ]
         )

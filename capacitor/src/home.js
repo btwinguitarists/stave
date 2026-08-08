@@ -102,8 +102,39 @@ function newNote() {
 }
 
 // ── per-page options (long-press) ──
+// On device this is the real iOS action sheet + alert (Capacitor ActionSheet
+// and Dialog plugins); the HTML sheet below is only the browser-dev fallback.
 let sheetNote = null
-function openNoteSheet(n) {
+
+async function openNoteSheet(n) {
+  const cap = window.Capacitor
+  const AS = cap && cap.Plugins && cap.Plugins.ActionSheet
+  const DL = cap && cap.Plugins && cap.Plugins.Dialog
+  if (AS && DL && cap.isNativePlatform && cap.isNativePlatform()) {
+    try {
+      const { index } = await AS.showActions({
+        title: n.title,
+        options: [
+          { title: 'Write' },
+          { title: 'Export' },
+          { title: 'Delete', style: 'DESTRUCTIVE' },
+          { title: 'Cancel', style: 'CANCEL' }
+        ]
+      })
+      if (index === 0) { openNote(n) }
+      else if (index === 1) { window.__staveExport(n.title, n.idea) }
+      else if (index === 2) {
+        const { value } = await DL.confirm({
+          title: 'Delete this page?',
+          message: `“${n.title}” will be gone for good.`,
+          okButtonTitle: 'Delete',
+          cancelButtonTitle: 'Cancel'
+        })
+        if (value) { StaveFS.remove(n.path); render() }
+      }
+    } catch (e) { console.error('[home] native sheet failed:', e) }
+    return
+  }
   sheetNote = n
   document.getElementById('note-sheet-title').textContent = n.title.toUpperCase()
   const del = document.getElementById('note-sheet-delete')
@@ -116,7 +147,7 @@ function openNoteSheet(n) {
 function closeNoteSheet() {
   sheetNote = null
   document.getElementById('note-sheet-back').style.display = 'none'
-  document.getElementById('note-sheet').style.transform = ''
+  document.getElementById('note-sheet').style.transform = 'translateY(105%)'
 }
 
 function noteSheetOpen() {

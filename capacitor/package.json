@@ -8,8 +8,10 @@
     "sync": "node tools/build-www.js && npx cap sync ios"
   },
   "dependencies": {
+    "@capacitor/action-sheet": "^8.1.1",
     "@capacitor/app": "^8.1.0",
     "@capacitor/core": "^8.3.0",
+    "@capacitor/dialog": "^8.0.1",
     "@capacitor/ios": "^8.3.0",
     "stave-folder-plugin": "file:./stave-folder-plugin"
   },
