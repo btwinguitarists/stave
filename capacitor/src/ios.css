@@ -15,6 +15,31 @@ body { overscroll-behavior: none; }
 /* Voice memos are a Mac feature for now. */
 #lockin-rec-toggle, #lockin-recordings-panel { display: none !important; }
 
+/* ── PHONE LAYOUT ──
+   Lock In was designed around a wide canvas: a 200px right rail and 40px
+   gutters. On a phone the words get all of it; the rail becomes a small
+   floating cluster bottom-right. (Also applies in narrow iPad split view.) */
+@media (max-width: 700px) {
+  #write-column { padding: 14px 18px 90px; }
+  #doc-title {
+    font-size: 11px; letter-spacing: 0.04em; margin-bottom: 16px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #right-panel {
+    position: fixed; right: 0; bottom: 0; z-index: 40;
+    width: auto; padding: 0 14px calc(env(safe-area-inset-bottom) + 8px) 0;
+    background: transparent; pointer-events: none;
+  }
+  #right-panel > * { pointer-events: auto; }
+  #width-switcher { display: none; }   /* width is always full on a phone */
+  #word-count { margin-bottom: 8px; opacity: 0.45; }
+  #room-switcher { margin-bottom: 0; }
+  #fmt-toolbar { padding: 5px 10px; overflow-x: auto; scrollbar-width: none; }
+  #fmt-toolbar::-webkit-scrollbar { display: none; }
+  #stave-mark { visibility: hidden; }  /* the ‹ exit button lives in that corner on phones */
+  #editor { min-height: calc(100vh - 240px); }
+}
+
 /* Touch exit — Escape needs a glass-keyboard stand-in. */
 #ios-exit {
   position: fixed;
