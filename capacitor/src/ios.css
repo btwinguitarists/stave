@@ -8,6 +8,15 @@
 /* WKWebView zooms into sub-16px inputs and never zooms back out. */
 input, textarea { font-size: max(1em, 16px); }
 
+/* Fingers, not cursors: every control gets a real touch target. */
+* { -webkit-tap-highlight-color: transparent; }
+.fmt-btn { min-height: 36px; min-width: 36px; padding: 6px 12px; font-size: 12px; }
+#exit-btn { min-height: 36px; padding: 8px 16px; }
+.room-dot { width: 18px !important; height: 18px !important; border-radius: 9px !important; }
+#room-switcher, #width-switcher { gap: 14px !important; }
+#width-switcher button { min-height: 32px; padding: 5px 12px; }
+#outline-toggle { min-height: 36px; padding: 8px 14px; }
+
 /* Respect the iPad status bar / home indicator. */
 #top-bar { padding-top: env(safe-area-inset-top); height: calc(44px + env(safe-area-inset-top)); }
 body { overscroll-behavior: none; }

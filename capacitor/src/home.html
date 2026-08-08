@@ -51,6 +51,7 @@
     .note {
       padding: 16px 2px; border-bottom: 0.5px solid var(--border);
       cursor: pointer;
+      -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
     }
     .note:active { background: var(--bg2); }
     .note-top { display: flex; align-items: baseline; gap: 10px; }
@@ -121,6 +122,15 @@
     </div>
   </div>
   <button id="new-note" title="New page">+</button>
+
+  <div id="note-sheet-back" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:10;" onclick="closeNoteSheet()"></div>
+  <div id="note-sheet" style="position:fixed; left:0; right:0; bottom:0; z-index:11; background:var(--bg2); border-top:0.5px solid var(--border2); border-radius:18px 18px 0 0; padding:24px 24px calc(env(safe-area-inset-bottom) + 26px); transform:translateY(105%); transition:transform 0.25s ease;">
+    <h2 id="note-sheet-title" style="font-size:13px; letter-spacing:0.1em; color:var(--text2); margin-bottom:16px; font-weight:400; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></h2>
+    <button class="primary" style="width:100%; padding:15px; border-radius:10px; border:none; background:var(--accent); color:#1c1c1e; font-family:var(--font); font-size:15px;" onclick="noteSheetOpen()">Write</button>
+    <button class="quiet" style="width:100%; padding:14px; margin-top:10px; border-radius:10px; background:none; border:0.5px solid var(--border2); color:var(--text2); font-family:var(--font); font-size:14px;" onclick="noteSheetExport()">Export</button>
+    <button id="note-sheet-delete" class="quiet" style="width:100%; padding:14px; margin-top:10px; border-radius:10px; background:none; border:0.5px solid rgba(200,80,60,0.5); color:#c85a3c; font-family:var(--font); font-size:14px;" onclick="noteSheetDelete()">Delete</button>
+    <button class="quiet" style="width:100%; padding:14px; margin-top:10px; border-radius:10px; background:none; border:0.5px solid var(--border2); color:var(--text2); font-family:var(--font); font-size:14px;" onclick="closeNoteSheet()">Cancel</button>
+  </div>
 
   <div id="sheet-back" onclick="closeSheet()"></div>
   <div id="sheet">

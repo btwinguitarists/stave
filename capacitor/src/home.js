@@ -54,7 +54,16 @@ function render() {
       <div class="note-snippet"></div>`
     row.querySelector('.note-title').textContent = n.title
     row.querySelector('.note-snippet').textContent = n.snippet
-    row.onclick = () => openNote(n)
+    let pressTimer = null, longPressed = false
+    row.addEventListener('touchstart', () => {
+      longPressed = false
+      pressTimer = setTimeout(() => { longPressed = true; openNoteSheet(n) }, 500)
+    }, { passive: true })
+    row.addEventListener('touchmove', () => clearTimeout(pressTimer), { passive: true })
+    row.addEventListener('touchend', () => clearTimeout(pressTimer), { passive: true })
+    row.addEventListener('touchcancel', () => clearTimeout(pressTimer), { passive: true })
+    row.oncontextmenu = e => { e.preventDefault(); openNoteSheet(n) }
+    row.onclick = () => { if (!longPressed) openNote(n) }
     list.appendChild(row)
   })
   document.getElementById('pending-dot').style.display = StaveFS.pendingCount() ? 'block' : 'none'
@@ -90,6 +99,48 @@ function newNote() {
     filepath: rel, mode: 'write', title: tab.title, content: '', recordings: []
   }))
   location.href = 'lockin.html'
+}
+
+// ── per-page options (long-press) ──
+let sheetNote = null
+function openNoteSheet(n) {
+  sheetNote = n
+  document.getElementById('note-sheet-title').textContent = n.title.toUpperCase()
+  const del = document.getElementById('note-sheet-delete')
+  del.textContent = 'Delete'
+  del.dataset.armed = ''
+  document.getElementById('note-sheet-back').style.display = 'block'
+  document.getElementById('note-sheet').style.transform = 'none'
+}
+
+function closeNoteSheet() {
+  sheetNote = null
+  document.getElementById('note-sheet-back').style.display = 'none'
+  document.getElementById('note-sheet').style.transform = ''
+}
+
+function noteSheetOpen() {
+  const n = sheetNote
+  closeNoteSheet()
+  if (n) openNote(n)
+}
+
+function noteSheetExport() {
+  const n = sheetNote
+  closeNoteSheet()
+  if (n) window.__staveExport(n.title, n.idea)
+}
+
+function noteSheetDelete() {
+  const del = document.getElementById('note-sheet-delete')
+  if (!del.dataset.armed) {
+    del.dataset.armed = '1'
+    del.textContent = 'Really delete? This can’t be undone.'
+    return
+  }
+  const n = sheetNote
+  closeNoteSheet()
+  if (n) { StaveFS.remove(n.path); render() }
 }
 
 function openSheet() {
