@@ -71,7 +71,10 @@ fs.writeFileSync(path.join(WWW, 'stave-core.js'), core)
 let lockin = fs.readFileSync(path.join(ROOT, 'lockin.html'), 'utf8')
 if (!lockin.includes('<head>')) fail('lockin.html: no <head>')
 lockin = lockin.replace('<head>',
-  '<head>\n  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">\n  <link rel="stylesheet" href="ios.css">')
+  '<head>\n  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">')
+if (!lockin.includes('</head>')) fail('lockin.html: no </head>')
+// after the page's inline <style> so iOS overrides actually win
+lockin = lockin.replace('</head>', '  <link rel="stylesheet" href="ios.css">\n</head>')
 const firstScript = lockin.indexOf('<script>')
 if (firstScript === -1) fail('lockin.html: no inline <script>')
 lockin = lockin.slice(0, firstScript)
