@@ -1,0 +1,9 @@
+{
+  "appId": "com.benvanscyoc.stave",
+  "appName": "Stave",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#1c1c1e"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "stave-ios",
+  "version": "1.0.0",
+  "description": "Stave for iPad/iPhone — Capacitor wrapper around the Lock In writing environment",
+  "private": true,
+  "scripts": {
+    "build": "node tools/build-www.js",
+    "sync": "node tools/build-www.js && npx cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor/app": "^8.1.0",
+    "@capacitor/core": "^8.3.0",
+    "@capacitor/ios": "^8.3.0",
+    "stave-folder-plugin": "file:./stave-folder-plugin"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.3.0"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "stave-folder-plugin",
+  "version": "1.0.0",
+  "description": "Stave notes folder access: app Documents by default, or a user-picked iCloud Drive folder via security-scoped bookmark",
+  "main": "index.js",
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    }
+  },
+  "keywords": ["capacitor", "plugin", "native"],
+  "files": ["ios/", "Package.swift", "index.js"],
+  "license": "ISC"
+}

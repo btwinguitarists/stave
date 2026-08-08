@@ -1,0 +1,5 @@
+node_modules/
+www/
+ios/App/build/
+ios/App/App/public/
+ios/DerivedData/

@@ -1,0 +1,32 @@
+/* iOS adjustments layered over Cody's lockin.html styles. */
+
+/* JetBrains Mono isn't on iOS — fall back to SF Mono, not Courier. */
+.room-stave, .room-midnight, .room-terminal {
+  --font: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+/* WKWebView zooms into sub-16px inputs and never zooms back out. */
+input, textarea { font-size: max(1em, 16px); }
+
+/* Respect the iPad status bar / home indicator. */
+#top-bar { padding-top: env(safe-area-inset-top); height: calc(44px + env(safe-area-inset-top)); }
+body { overscroll-behavior: none; }
+
+/* Voice memos are a Mac feature for now. */
+#lockin-rec-toggle, #lockin-recordings-panel { display: none !important; }
+
+/* Touch exit — Escape needs a glass-keyboard stand-in. */
+#ios-exit {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 10px);
+  left: 14px;
+  z-index: 60;
+  width: 40px; height: 40px;
+  border: none; border-radius: 20px;
+  background: transparent;
+  color: var(--text2, #9a9080);
+  font-size: 22px; line-height: 40px;
+  font-family: inherit;
+  cursor: pointer;
+}
+#ios-exit:active { color: var(--accent, #c8922a); }
