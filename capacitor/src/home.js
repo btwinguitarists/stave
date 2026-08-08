@@ -42,30 +42,7 @@ function render() {
   const list = document.getElementById('list')
   list.innerHTML = ''
   document.getElementById('empty').style.display = notes.length ? 'none' : 'block'
-  notes.forEach(n => {
-    const row = document.createElement('div')
-    row.className = 'note' + (n.mode === 'longform' ? ' longform' : '')
-    row.innerHTML = `
-      <div class="note-top">
-        <span class="note-dot">✦</span>
-        <span class="note-title"></span>
-        <span class="note-date">${fmtDate(n.mtime)}</span>
-      </div>
-      <div class="note-snippet"></div>`
-    row.querySelector('.note-title').textContent = n.title
-    row.querySelector('.note-snippet').textContent = n.snippet
-    let pressTimer = null, longPressed = false
-    row.addEventListener('touchstart', () => {
-      longPressed = false
-      pressTimer = setTimeout(() => { longPressed = true; openNoteSheet(n) }, 500)
-    }, { passive: true })
-    row.addEventListener('touchmove', () => clearTimeout(pressTimer), { passive: true })
-    row.addEventListener('touchend', () => clearTimeout(pressTimer), { passive: true })
-    row.addEventListener('touchcancel', () => clearTimeout(pressTimer), { passive: true })
-    row.oncontextmenu = e => { e.preventDefault(); openNoteSheet(n) }
-    row.onclick = () => { if (!longPressed) openNote(n) }
-    list.appendChild(row)
-  })
+  notes.forEach(n => list.appendChild(buildRow(n)))
   document.getElementById('pending-dot').style.display = StaveFS.pendingCount() ? 'block' : 'none'
   renderStorage()
 }
@@ -99,6 +76,110 @@ function newNote() {
     filepath: rel, mode: 'write', title: tab.title, content: '', recordings: []
   }))
   location.href = 'lockin.html'
+}
+
+// ── page rows: swipe-left for Export/Delete (the primary iOS gesture),
+//    long-press for the native action sheet as a secondary path ──
+const REVEAL = 160
+let openRow = null
+
+function closeOpenRow() {
+  if (openRow) { openRow.style.transform = ''; openRow._open = false; openRow = null }
+}
+
+async function confirmDelete(n, wrap) {
+  const cap = window.Capacitor
+  const DL = cap && cap.Plugins && cap.Plugins.Dialog
+  let go = false
+  if (DL && cap.isNativePlatform && cap.isNativePlatform()) {
+    const { value } = await DL.confirm({
+      title: 'Delete this page?',
+      message: `“${n.title}” will be gone for good.`,
+      okButtonTitle: 'Delete',
+      cancelButtonTitle: 'Cancel'
+    })
+    go = value
+  } else {
+    go = window.confirm(`Delete “${n.title}”? This can’t be undone.`)
+  }
+  if (!go) { closeOpenRow(); return }
+  wrap.style.maxHeight = wrap.offsetHeight + 'px'
+  requestAnimationFrame(() => wrap.classList.add('collapsing'))
+  setTimeout(() => { StaveFS.remove(n.path); render() }, 230)
+}
+
+function buildRow(n) {
+  const wrap = document.createElement('div')
+  wrap.className = 'swipe-wrap'
+  const actions = document.createElement('div')
+  actions.className = 'swipe-actions'
+  const exp = document.createElement('button')
+  exp.className = 'swipe-btn export'
+  exp.textContent = 'Export'
+  exp.onclick = () => { closeOpenRow(); window.__staveExport(n.title, n.idea) }
+  const del = document.createElement('button')
+  del.className = 'swipe-btn delete'
+  del.textContent = 'Delete'
+  del.onclick = () => confirmDelete(n, wrap)
+  actions.append(exp, del)
+
+  const row = document.createElement('div')
+  row.className = 'note' + (n.mode === 'longform' ? ' longform' : '')
+  row.innerHTML = `
+    <div class="note-top">
+      <span class="note-dot">✦</span>
+      <span class="note-title"></span>
+      <span class="note-date">${fmtDate(n.mtime)}</span>
+    </div>
+    <div class="note-snippet"></div>`
+  row.querySelector('.note-title').textContent = n.title
+  row.querySelector('.note-snippet').textContent = n.snippet
+
+  let startX = 0, startY = 0, dx = 0, horiz = null
+  let pressTimer = null, longPressed = false
+  row.addEventListener('touchstart', e => {
+    const t = e.touches[0]
+    startX = t.clientX; startY = t.clientY; dx = row._open ? -REVEAL : 0; horiz = null
+    longPressed = false
+    pressTimer = setTimeout(() => {
+      if (horiz === null) { longPressed = true; openNoteSheet(n) }
+    }, 500)
+    row.classList.add('swiping')
+  }, { passive: true })
+  row.addEventListener('touchmove', e => {
+    const t = e.touches[0]
+    const mx = t.clientX - startX, my = t.clientY - startY
+    if (horiz === null && (Math.abs(mx) > 8 || Math.abs(my) > 8)) {
+      horiz = Math.abs(mx) > Math.abs(my)
+      clearTimeout(pressTimer)
+      if (horiz && openRow && openRow !== row) closeOpenRow()
+    }
+    if (!horiz) return
+    e.preventDefault()
+    dx = Math.min(0, (row._open ? -REVEAL : 0) + mx)
+    if (dx < -REVEAL) dx = -REVEAL + (dx + REVEAL) * 0.25
+    row.style.transform = `translateX(${dx}px)`
+  }, { passive: false })
+  const settle = () => {
+    clearTimeout(pressTimer)
+    row.classList.remove('swiping')
+    if (horiz) {
+      row._open = dx < -REVEAL / 2
+      row.style.transform = row._open ? `translateX(${-REVEAL}px)` : ''
+      openRow = row._open ? row : (openRow === row ? null : openRow)
+    }
+  }
+  row.addEventListener('touchend', settle, { passive: true })
+  row.addEventListener('touchcancel', settle, { passive: true })
+  row.oncontextmenu = e => { e.preventDefault(); openNoteSheet(n) }
+  row.onclick = () => {
+    if (longPressed || horiz) return
+    if (row._open || openRow) { closeOpenRow(); return }
+    openNote(n)
+  }
+
+  wrap.append(actions, row)
+  return wrap
 }
 
 // ── per-page options (long-press) ──

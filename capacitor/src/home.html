@@ -48,10 +48,33 @@
     }
     #search::placeholder { color: var(--text3); }
     #search:focus { border-color: var(--border2); }
+    .swipe-wrap {
+      position: relative; overflow: hidden;
+      border-bottom: 0.5px solid var(--border);
+    }
+    .swipe-actions {
+      position: absolute; top: 0; bottom: 0; right: 0;
+      display: flex; width: 160px;
+    }
+    .swipe-btn {
+      flex: 1; border: none; cursor: pointer;
+      font-family: var(--font); font-size: 13px; font-weight: 500;
+    }
+    .swipe-btn.export { background: var(--accent); color: #1c1c1e; }
+    .swipe-btn.delete { background: #e5443c; color: #fff; }
     .note {
-      padding: 16px 2px; border-bottom: 0.5px solid var(--border);
+      position: relative; z-index: 1;
+      padding: 16px 2px;
+      background: var(--bg);
       cursor: pointer;
       -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+      transition: transform 0.24s cubic-bezier(0.25, 0.8, 0.25, 1);
+      touch-action: pan-y;
+    }
+    .note.swiping { transition: none; }
+    .swipe-wrap.collapsing {
+      transition: max-height 0.22s ease, opacity 0.22s ease;
+      max-height: 0 !important; opacity: 0;
     }
     .note:active { background: var(--bg2); }
     .note-top { display: flex; align-items: baseline; gap: 10px; }
