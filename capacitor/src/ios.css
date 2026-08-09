@@ -24,6 +24,23 @@ body { overscroll-behavior: none; }
 /* Voice memos are a Mac feature for now. */
 #lockin-rec-toggle, #lockin-recordings-panel { display: none !important; }
 
+/* Drawer toggle lives in the toolbar on iOS. */
+#drawer-toggle.in-toolbar {
+  position: static !important;
+  transform: none !important;
+  width: 40px; min-height: 36px;
+  margin-right: 4px;
+  font-size: 15px; line-height: 1;
+  border: 0.5px solid var(--border2);
+  border-radius: 4px;
+  background: transparent;
+}
+#drawer-toggle.in-toolbar.open { color: var(--accent); border-color: var(--accent); }
+
+/* Typewriter mode: room to keep the last lines centered. */
+.tw-on #editor { padding-bottom: 45vh; }
+.fmt-btn.tw-active { color: var(--accent); border-color: var(--accent); }
+
 /* ── PHONE LAYOUT ──
    Lock In was designed around a wide canvas: a 200px right rail and 40px
    gutters. On a phone the words get all of it; the rail becomes a small

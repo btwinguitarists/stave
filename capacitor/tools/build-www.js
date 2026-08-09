@@ -41,7 +41,9 @@ const core = [
   setBible(idx) { bibleIndex = idx },
   hasCmu: () => !!cmuDict, hasBible: () => !!bibleIndex,
   bible: w => (bibleIndex ? (bibleIndex[w] || []) : []),
-  getRhymeSignature, findRhymes, countSyllables, countLineSyllables,
+  getCmuCache: () => (cmuDict ? cmuDict._cache : null),
+  getRhymeSignature, getVowelSound, getEndingConsonants,
+  findRhymes, countSyllables, countLineSyllables,
   findWordWebMatches, getPaletteCategories, SONGS_WORDS,
   serializeTab, parseNote, emptyTab, getDirForMode, getColorForMode,
   newTaskId, tabHasContent, looksLikeStaveNote
@@ -89,8 +91,10 @@ fs.copyFileSync(path.join(SRC, 'home.html'), path.join(WWW, 'index.html'))
 for (const f of ['home.js', 'shim.js', 'ios.css', 'lockin-ios-patch.js'])
   fs.copyFileSync(path.join(SRC, f), path.join(WWW, f))
 
-// data files
-fs.copyFileSync(path.join(ROOT, 'bible-index.json'), path.join(WWW, 'bible-index.json'))
+// data files — scripture from the BSB (Ben's house English text), synonyms
+// from WordNet with adjective satellites, rhymes from cmudict
+execFileSync('node', [path.join(__dirname, 'build-bible-bsb.js'), path.join(WWW, 'bible-index.json')], { stdio: 'inherit' })
+execFileSync('node', [path.join(__dirname, 'build-synonyms.js'), path.join(WWW, 'synonyms.json')], { stdio: 'inherit' })
 execFileSync('node', [path.join(__dirname, 'dump-cmudict.js'), path.join(WWW, 'cmudict.json')], { stdio: 'inherit' })
 
 const total = fs.readdirSync(WWW).reduce((s, f) => s + fs.statSync(path.join(WWW, f)).size, 0)

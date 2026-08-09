@@ -135,25 +135,67 @@ const bus = {
 }
 window.__staveBus = bus
 
-// ── drawer engine (bible + rhymes local; WordNet synonyms not on iOS) ──
-let dataLoading = null
+// ── drawer engine: rhymes (cmudict), scripture (BSB), synonyms (WordNet) ──
+// Each resource loads independently and re-tries on the next lookup if its
+// fetch failed, so one bad load can never permanently empty the drawer.
+let SYNONYMS = null
+let drawerLoading = null
 function ensureDrawerData() {
-  if (dataLoading) return dataLoading
-  dataLoading = Promise.all([
-    window.StaveCore.hasCmu() ? null : fetch('cmudict.json').then(r => r.json()).then(d => window.StaveCore.setCmu(d)),
-    window.StaveCore.hasBible() ? null : fetch('bible-index.json').then(r => r.json()).then(d => window.StaveCore.setBible(d))
-  ]).catch(e => { console.error('[drawer] data load failed:', e); dataLoading = null })
-  return dataLoading
+  if (drawerLoading) return drawerLoading
+  const tasks = []
+  if (!window.StaveCore.hasCmu())
+    tasks.push(fetch('cmudict.json').then(r => r.json()).then(d => window.StaveCore.setCmu(d))
+      .catch(e => console.error('[drawer] cmudict load failed:', e)))
+  if (!window.StaveCore.hasBible())
+    tasks.push(fetch('bible-index.json').then(r => r.json()).then(d => window.StaveCore.setBible(d))
+      .catch(e => console.error('[drawer] bible load failed:', e)))
+  if (!SYNONYMS)
+    tasks.push(fetch('synonyms.json').then(r => r.json()).then(d => { SYNONYMS = d })
+      .catch(e => console.error('[drawer] synonyms load failed:', e)))
+  if (!tasks.length) return Promise.resolve()
+  drawerLoading = Promise.all(tasks).finally(() => { drawerLoading = null })
+  return drawerLoading
 }
+window.__stavePreloadDrawer = ensureDrawerData
 
 function drawerLookup(word) {
   const C = window.StaveCore
   const clean = String(word || '').replace(/[^a-z]/gi, '').toLowerCase()
   if (clean.length < 2) return
   ensureDrawerData().then(() => {
-    const { perfect, near } = C.findRhymes(clean)
     const wordSig = C.getRhymeSignature(clean)
     const rhymesWith = w => { const s = C.getRhymeSignature(w); return !!(wordSig && s && s === wordSig) }
+    const synonyms = ((SYNONYMS && SYNONYMS[clean]) || [])
+      .map(s => ({ word: s, rhymes: rhymesWith(s) }))
+    // Rhyme scan with a real-word gate: cmudict brims with surnames, so a
+    // candidate must be attested in WordNet or Scripture to make the list.
+    const isRealWord = w => !!((SYNONYMS && SYNONYMS[w]) || C.bible(w).length)
+    const perfect = [], slant = [], loose = []
+    const cache = C.getCmuCache && C.getCmuCache()
+    if (cache && wordSig) {
+      // slant = same tail after the stressed vowel, different vowel
+      // (light -> late/note; beautiful -> merciful/bountiful) — the list a
+      // songwriter actually wants under "near".
+      const tail = wordSig.split('-').slice(1).join('-')
+      const vowel = C.getVowelSound(clean)
+      const wordUp = clean.toUpperCase()
+      for (const key of Object.keys(cache)) {
+        if (perfect.length >= 14 && slant.length >= 14) break
+        if (key === wordUp || key.length < 3 || !/^[A-Z]+$/.test(key)) continue
+        const cand = key.toLowerCase()
+        if (!isRealWord(cand)) continue
+        const candSig = C.getRhymeSignature(cand)
+        if (!candSig) continue
+        if (candSig === wordSig) { if (perfect.length < 14) perfect.push(cand); continue }
+        const cParts = candSig.split('-')
+        if (tail && /[12]$/.test(cParts[0] || '') && cParts.slice(1).join('-') === tail) {
+          if (slant.length < 14) slant.push(cand)
+          continue
+        }
+        if (loose.length < 14 && vowel && C.getVowelSound(cand) === vowel) loose.push(cand)
+      }
+    }
+    const near = slant.concat(loose).slice(0, 14)
     const songs = Object.values(C.SONGS_WORDS).map(g => ({
       label: g.label,
       synonyms: g.synonyms.map(w => ({ word: w, rhymes: rhymesWith(w.split(' ')[0]) })),
@@ -169,7 +211,7 @@ function drawerLookup(word) {
       word: clean,
       syllables: C.countSyllables(clean),
       rhymes: { perfect, near },
-      synonyms: [],
+      synonyms,
       wordweb, songs,
       scripture: C.bible(clean)
     })
