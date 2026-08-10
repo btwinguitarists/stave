@@ -78,18 +78,33 @@
     m.remove()
     return y
   }
-  let twRaf = 0
+  let twTimer = 0
   function typewriterScroll() {
     if (localStorage.getItem('stave-typewriter') !== 'on') return
-    cancelAnimationFrame(twRaf)
-    twRaf = requestAnimationFrame(() => {
+    clearTimeout(twTimer)
+    // setTimeout, not rAF: rAF stalls whenever the webview skips frames
+    // (keyboard transitions, backgrounding) and the caret would stop tracking.
+    twTimer = setTimeout(() => {
       const ed = document.getElementById('editor')
-      const col = document.getElementById('write-column')
-      if (!ed || !col) return
-      const target = ed.offsetTop + caretTop(ed) - col.clientHeight * 0.42
-      if (Math.abs(col.scrollTop - target) > 14) col.scrollTop = Math.max(0, target)
-    })
+      if (!ed) return
+      // The editor is a textarea with its OWN internal scroll — that's the
+      // thing to drive. Center the caret within however much of the editor
+      // the keyboard leaves visible.
+      const cs = getComputedStyle(ed)
+      const caretY = caretTop(ed) + (parseFloat(cs.paddingTop) || 0)
+      let visible = ed.clientHeight
+      if (window.visualViewport) {
+        const edTop = Math.max(0, ed.getBoundingClientRect().top)
+        visible = Math.min(visible, Math.max(120, window.visualViewport.height - edTop))
+      }
+      const target = Math.max(0, caretY - visible * 0.42)
+      if (Math.abs(ed.scrollTop - target) > 10) ed.scrollTop = target
+    }, 16)
   }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', typewriterScroll)
+  }
+  window.__twScroll = typewriterScroll
   function applyTypewriter() {
     const on = localStorage.getItem('stave-typewriter') === 'on'
     document.body.classList.toggle('tw-on', on)
@@ -109,12 +124,15 @@
     }
     toolbar.appendChild(tw)
   }
-  const edEl = document.getElementById('editor')
-  if (edEl) {
-    for (const ev of ['input', 'keyup', 'click', 'focus']) {
-      edEl.addEventListener(ev, typewriterScroll, { passive: true })
-    }
+  // Delegated on document so it survives lockin re-creating the editor node.
+  for (const ev of ['input', 'keyup', 'click']) {
+    document.addEventListener(ev, e => {
+      if (e.target && e.target.id === 'editor') typewriterScroll()
+    }, { passive: true })
   }
+  document.addEventListener('focusin', e => {
+    if (e.target && e.target.id === 'editor') typewriterScroll()
+  })
 
   // Touch exit button (Escape on Mac).
   const exit = document.createElement('button')

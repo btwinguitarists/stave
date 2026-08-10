@@ -37,8 +37,10 @@ body { overscroll-behavior: none; }
 }
 #drawer-toggle.in-toolbar.open { color: var(--accent); border-color: var(--accent); }
 
-/* Typewriter mode: room to keep the last lines centered. */
-.tw-on #editor { padding-bottom: 45vh; }
+/* Typewriter mode: the page opens mid-screen and stays there — space above
+   so even the first line sits centered, space below so the last one can. */
+.tw-on #editor { padding-top: 34vh; padding-bottom: 52vh; }
+.tw-on #doc-title { margin-bottom: 0; }
 .fmt-btn.tw-active { color: var(--accent); border-color: var(--accent); }
 
 /* ── PHONE LAYOUT ──
