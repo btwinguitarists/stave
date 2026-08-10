@@ -56,51 +56,76 @@
     toolbar.appendChild(aa)
   }
 
-  // Typewriter mode — the active line rides near the vertical center.
+  // Typewriter mode — the active line rides near the vertical center,
+  // gliding there on a critically-damped spring instead of jumping.
+  let twMirror = null, twMark = null
   function caretTop(ed) {
     const cs = getComputedStyle(ed)
-    const m = document.createElement('div')
-    for (const p of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight',
-                     'letterSpacing', 'paddingLeft', 'paddingRight', 'borderWidth']) {
-      m.style[p] = cs[p]
+    if (!twMirror) {
+      twMirror = document.createElement('div')
+      twMirror.style.position = 'absolute'
+      twMirror.style.left = '-99999px'
+      twMirror.style.top = '0'
+      twMirror.style.visibility = 'hidden'
+      twMirror.style.whiteSpace = 'pre-wrap'
+      twMirror.style.wordWrap = 'break-word'
+      twMark = document.createElement('span')
+      twMark.textContent = '​'
+      document.body.appendChild(twMirror)
     }
-    m.style.width = ed.clientWidth + 'px'
-    m.style.position = 'absolute'
-    m.style.visibility = 'hidden'
-    m.style.whiteSpace = 'pre-wrap'
-    m.style.wordWrap = 'break-word'
-    m.textContent = ed.value.slice(0, ed.selectionStart)
-    const mark = document.createElement('span')
-    mark.textContent = '​'
-    m.appendChild(mark)
-    document.body.appendChild(m)
-    const y = mark.offsetTop
-    m.remove()
-    return y
+    for (const p of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight',
+                     'letterSpacing', 'paddingLeft', 'paddingRight']) {
+      twMirror.style[p] = cs[p]
+    }
+    twMirror.style.width = ed.clientWidth + 'px'
+    twMirror.textContent = ed.value.slice(0, ed.selectionStart)
+    twMirror.appendChild(twMark)
+    return twMark.offsetTop + (parseFloat(cs.paddingTop) || 0)
   }
+
+  let twGoal = null, twGliding = false
+  function twGlide() {
+    const ed = document.getElementById('editor')
+    if (!ed || twGoal === null || localStorage.getItem('stave-typewriter') !== 'on') {
+      twGliding = false
+      return
+    }
+    const diff = twGoal - ed.scrollTop
+    if (Math.abs(diff) < 0.75) {
+      ed.scrollTop = twGoal
+      twGliding = false
+      return
+    }
+    ed.scrollTop = ed.scrollTop + diff * 0.18
+    setTimeout(twGlide, 16)  // not rAF: frame callbacks stall in keyboard transitions
+  }
+
   let twTimer = 0
   function typewriterScroll() {
     if (localStorage.getItem('stave-typewriter') !== 'on') return
     clearTimeout(twTimer)
-    // setTimeout, not rAF: rAF stalls whenever the webview skips frames
-    // (keyboard transitions, backgrounding) and the caret would stop tracking.
     twTimer = setTimeout(() => {
       const ed = document.getElementById('editor')
       if (!ed) return
-      // The editor is a textarea with its OWN internal scroll — that's the
-      // thing to drive. Center the caret within however much of the editor
-      // the keyboard leaves visible.
-      const cs = getComputedStyle(ed)
-      const caretY = caretTop(ed) + (parseFloat(cs.paddingTop) || 0)
+      const caretY = caretTop(ed)
       let visible = ed.clientHeight
       if (window.visualViewport) {
         const edTop = Math.max(0, ed.getBoundingClientRect().top)
         visible = Math.min(visible, Math.max(120, window.visualViewport.height - edTop))
       }
       const target = Math.max(0, caretY - visible * 0.42)
-      if (Math.abs(ed.scrollTop - target) > 10) ed.scrollTop = target
-    }, 16)
+      if (Math.abs(ed.scrollTop - target) <= 4) return
+      twGoal = target
+      if (!twGliding) { twGliding = true; setTimeout(twGlide, 0) }
+    }, 24)
   }
+  window.__twState = () => ({ goal: twGoal, gliding: twGliding })
+
+  // iOS pans the whole viewport to "help" reveal focused inputs; our caret is
+  // always centered, so any pan is pure fight — pin the window still.
+  window.addEventListener('scroll', () => {
+    if (window.scrollY) window.scrollTo(0, 0)
+  }, { passive: true })
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', typewriterScroll)
   }

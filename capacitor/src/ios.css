@@ -1,5 +1,9 @@
 /* iOS adjustments layered over Cody's lockin.html styles. */
 
+/* Page transitions: a breath of fade instead of a hard cut. */
+@keyframes stave-fadein { from { opacity: 0 } to { opacity: 1 } }
+body { animation: stave-fadein 0.18s ease-out; }
+
 /* JetBrains Mono isn't on iOS — fall back to SF Mono, not Courier. */
 .room-stave, .room-midnight, .room-terminal {
   --font: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
