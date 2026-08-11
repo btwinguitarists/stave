@@ -107,6 +107,10 @@
     twTimer = setTimeout(() => {
       const ed = document.getElementById('editor')
       if (!ed) return
+      // A live selection (double-tapped word) holds the view still — iOS
+      // anchors its callout menu to the word, and typewriter tracking the
+      // INSERTION point is the native behavior anyway.
+      if (ed.selectionStart !== ed.selectionEnd) return
       const caretY = caretTop(ed)
       let visible = ed.clientHeight
       if (window.visualViewport) {
@@ -150,13 +154,19 @@
     toolbar.appendChild(tw)
   }
   // Delegated on document so it survives lockin re-creating the editor node.
-  for (const ev of ['input', 'keyup', 'click']) {
+  for (const ev of ['input', 'keyup']) {
     document.addEventListener(ev, e => {
       if (e.target && e.target.id === 'editor') typewriterScroll()
     }, { passive: true })
   }
   document.addEventListener('focusin', e => {
     if (e.target && e.target.id === 'editor') typewriterScroll()
+  })
+  // NOT 'click': it fires before WebKit finishes placing the caret, so it
+  // centers the PREVIOUS line. selectionchange fires after the caret lands.
+  document.addEventListener('selectionchange', () => {
+    const ed = document.getElementById('editor')
+    if (ed && document.activeElement === ed) typewriterScroll()
   })
 
   // Touch exit button (Escape on Mac).
