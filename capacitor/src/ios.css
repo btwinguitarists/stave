@@ -42,7 +42,8 @@ body { overscroll-behavior: none; }
 #drawer-toggle.in-toolbar.open { color: var(--accent); border-color: var(--accent); }
 
 /* Typewriter mode: the page opens mid-screen and stays there — space above
-   so even the first line sits centered, space below so the last one can. */
+   so even the first line sits centered, space below so the last one can.
+   (body-scoped; applyTypewriter re-applies after setRoom wipes body classes) */
 .tw-on #editor { padding-top: 34vh; padding-bottom: 52vh; }
 .tw-on #doc-title { margin-bottom: 0; }
 .fmt-btn.tw-active { color: var(--accent); border-color: var(--accent); }
@@ -68,8 +69,22 @@ body { overscroll-behavior: none; }
   #room-switcher { margin-bottom: 0; }
   #fmt-toolbar { padding: 5px 10px; overflow-x: auto; scrollbar-width: none; }
   #fmt-toolbar::-webkit-scrollbar { display: none; }
+  #ios-more { margin-left: auto; min-width: 44px; font-size: 18px; }
   #editor { min-height: calc(100vh - 240px); }
 }
+
+/* Phone: only the mark-making strip stays visible; secondary controls live
+   in the native ⋯ sheet, and the corner reduces to the word count. */
+#ios-more { display: none; }
+.phone #ios-more { display: block; margin-left: auto; min-width: 44px; font-size: 18px; }
+.phone .phone-hidden,
+.phone #ios-export,
+.phone #ios-fontsize,
+.phone #ios-typewriter { display: none !important; }
+.phone #room-switcher,
+.phone #room-flash,
+.phone #outline-btn { display: none !important; }
+.phone #word-count { margin-bottom: 2px; }
 
 /* Touch exit — Escape needs a glass-keyboard stand-in. It takes the S† mark's
    corner and sits vertically centered in the top bar, every screen size. */

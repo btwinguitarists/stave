@@ -9,22 +9,26 @@
   if (typeof origSetRoom === 'function') {
     window.setRoom = function (room) {
       try { localStorage.setItem('stave-room', room) } catch (e) {}
-      return origSetRoom(room)
+      const out = origSetRoom(room)
+      // setRoom assigns body.className wholesale — restore our body classes.
+      try { applyTypewriter() } catch (e) {}
+      return out
     }
   }
 
-  // Export button — share sheet with the page as .md + rendered PDF.
+  // Export — share sheet with the page as .md + rendered PDF.
+  function doExport(x, y) {
+    const title = (document.getElementById('doc-title') || {}).textContent || 'Stave note'
+    const md = (document.getElementById('editor') || {}).value || ''
+    window.__staveExport(title.trim(), md, x, y)
+  }
   const toolbar = document.getElementById('fmt-toolbar')
   if (toolbar) {
     const btn = document.createElement('button')
     btn.className = 'fmt-btn'
     btn.id = 'ios-export'
     btn.textContent = 'export'
-    btn.onclick = e => {
-      const title = (document.getElementById('doc-title') || {}).textContent || 'Stave note'
-      const md = (document.getElementById('editor') || {}).value || ''
-      window.__staveExport(title.trim(), md, e.clientX, e.clientY)
-    }
+    btn.onclick = e => doExport(e.clientX, e.clientY)
     toolbar.appendChild(btn)
   }
 
@@ -42,17 +46,19 @@
     const ed = document.getElementById('editor')
     if (ed) ed.style.fontSize = SIZES.includes(px) ? px + 'px' : ''
   }
+  function cycleFontSize() {
+    const cur = parseInt(localStorage.getItem('stave-fontsize') || '0', 10)
+    const next = SIZES[(SIZES.indexOf(cur) + 1) % SIZES.length]
+    localStorage.setItem('stave-fontsize', String(next))
+    applyFontSize()
+    return next
+  }
   if (toolbar) {
     const aa = document.createElement('button')
     aa.className = 'fmt-btn'
     aa.id = 'ios-fontsize'
     aa.textContent = 'Aa'
-    aa.onclick = () => {
-      const cur = parseInt(localStorage.getItem('stave-fontsize') || '0', 10)
-      const next = SIZES[(SIZES.indexOf(cur) + 1) % SIZES.length]
-      localStorage.setItem('stave-fontsize', String(next))
-      applyFontSize()
-    }
+    aa.onclick = cycleFontSize
     toolbar.appendChild(aa)
   }
 
@@ -141,17 +147,77 @@
     if (b) b.classList.toggle('tw-active', on)
     if (on) typewriterScroll()
   }
+  function toggleTypewriter() {
+    const on = localStorage.getItem('stave-typewriter') === 'on'
+    localStorage.setItem('stave-typewriter', on ? 'off' : 'on')
+    applyTypewriter()
+  }
   if (toolbar) {
     const tw = document.createElement('button')
     tw.className = 'fmt-btn'
     tw.id = 'ios-typewriter'
     tw.textContent = 'typewriter'
-    tw.onclick = () => {
-      const on = localStorage.getItem('stave-typewriter') === 'on'
-      localStorage.setItem('stave-typewriter', on ? 'off' : 'on')
-      applyTypewriter()
-    }
+    tw.onclick = toggleTypewriter
     toolbar.appendChild(tw)
+  }
+
+  // ── phone: a writing surface, not a shrunken desktop ──
+  // Keep only the mark-making strip (☰ B I " • —); everything secondary
+  // lives behind one native ⋯ sheet. The corner cluster reduces to the
+  // word count.
+  const phoneQuery = window.matchMedia('(max-width: 700px)')
+  function applyPhoneMode() {
+    // On <html>, not <body>: setRoom() assigns body.className wholesale.
+    document.documentElement.classList.toggle('phone', phoneQuery.matches)
+  }
+  phoneQuery.addEventListener('change', applyPhoneMode)
+  window.addEventListener('resize', applyPhoneMode, { passive: true })
+  applyPhoneMode()
+  if (toolbar) {
+    const importBtn = [...toolbar.querySelectorAll('button')]
+      .find(b => b.textContent.trim() === 'import')
+    if (importBtn) importBtn.classList.add('phone-hidden')
+
+    const more = document.createElement('button')
+    more.className = 'fmt-btn'
+    more.id = 'ios-more'
+    more.textContent = '⋯'
+    more.onclick = async () => {
+      const cap = window.Capacitor
+      const AS = cap && cap.Plugins && cap.Plugins.ActionSheet
+      const native = AS && cap.isNativePlatform && cap.isNativePlatform()
+      if (!native) { toggleTypewriter(); return }
+      const twOn = localStorage.getItem('stave-typewriter') === 'on'
+      const size = parseInt(localStorage.getItem('stave-fontsize') || '17', 10) || 17
+      try {
+        const { index } = await AS.showActions({
+          title: 'Writing room',
+          options: [
+            { title: (twOn ? '✓ ' : '') + 'Typewriter mode' },
+            { title: 'Text size ' + size + ' → bigger' },
+            { title: 'Change room' },
+            { title: 'Outline' },
+            { title: 'Import text' },
+            { title: 'Export page' },
+            { title: 'Cancel', style: 'CANCEL' }
+          ]
+        })
+        if (index === 0) toggleTypewriter()
+        else if (index === 1) cycleFontSize()
+        else if (index === 2) {
+          const rooms = ['stave', 'manuscript', 'midnight', 'parchment', 'terminal']
+          const r = await AS.showActions({
+            title: 'Room',
+            options: rooms.map(n => ({ title: n })).concat([{ title: 'Cancel', style: 'CANCEL' }])
+          })
+          if (r.index < rooms.length && typeof window.setRoom === 'function') window.setRoom(rooms[r.index])
+        }
+        else if (index === 3) { try { window.toggleOutline() } catch (e) {} }
+        else if (index === 4) { if (importBtn) importBtn.click() }
+        else if (index === 5) doExport()
+      } catch (e) { console.error('[phone] sheet failed:', e) }
+    }
+    toolbar.appendChild(more)
   }
   // Delegated on document so it survives lockin re-creating the editor node.
   for (const ev of ['input', 'keyup']) {
