@@ -113,11 +113,21 @@ const StaveFS = {
     if (!StaveNative) return { mode: 'local' }
     const res = await StaveNative.pickFolder()
     if (res && res.mode === 'folder') {
-      // Migrate local notes into the picked folder (skip paths that already exist there).
+      // Migrate local notes into the picked folder. NEVER drop content: a
+      // local page whose path exists in the folder with DIFFERENT text is
+      // preserved alongside it as a "(recovered)" copy. Losing days of
+      // writing to a skip-if-exists check is how we learned this.
       const local = { ...this.cache }
       await this.init()
       for (const [rel, e] of Object.entries(local)) {
-        if (rel.endsWith('.md') && !this.cache[rel]) this.write(rel, e.content)
+        if (!rel.endsWith('.md')) continue
+        const inFolder = this.cache[rel]
+        if (!inFolder) {
+          this.write(rel, e.content)
+        } else if (inFolder.content !== e.content) {
+          const recovered = rel.replace(/\.md$/, ' (recovered).md')
+          if (!this.cache[recovered]) this.write(recovered, e.content)
+        }
       }
     }
     return res

@@ -49,9 +49,14 @@ function render() {
 
 function renderStorage() {
   const el = document.getElementById('storage')
+  el.style.color = ''
   if (StaveFS.mode === 'folder') {
     el.textContent = `iCloud · ${StaveFS.folderName || 'Stave'}`
     el.classList.add('connected')
+  } else if (StaveFS.mode === 'folder-lost') {
+    el.textContent = '⚠ reconnect iCloud folder'
+    el.style.color = 'var(--accent)'
+    el.classList.remove('connected')
   } else {
     el.textContent = 'on this iPad'
     el.classList.remove('connected')
@@ -258,9 +263,11 @@ function noteSheetDelete() {
 function openSheet() {
   document.getElementById('sheet-info').textContent = StaveFS.mode === 'folder'
     ? `Your pages live in "${StaveFS.folderName}" in iCloud Drive — the same folder Stave on your Mac writes to. Edits sync both ways.`
-    : 'Your pages are stored on this device. Connect the "Stave" folder in iCloud Drive to write in the same notebook as your Mac.'
+    : StaveFS.mode === 'folder-lost'
+      ? 'iPadOS dropped this app’s permission to your iCloud folder, so recent pages were kept safely on this device instead. Reconnect the folder and everything here is carried over — pages that changed in both places are kept as "(recovered)" copies, never overwritten.'
+      : 'Your pages are stored on this device. Connect the "Stave" folder in iCloud Drive to write in the same notebook as your Mac.'
   document.getElementById('connect-btn').textContent = StaveFS.mode === 'folder'
-    ? 'Choose a different folder' : 'Connect iCloud Drive folder'
+    ? 'Choose a different folder' : StaveFS.mode === 'folder-lost' ? 'Reconnect iCloud folder' : 'Connect iCloud Drive folder'
   document.getElementById('sheet-back').style.display = 'block'
   document.getElementById('sheet').classList.add('open')
 }

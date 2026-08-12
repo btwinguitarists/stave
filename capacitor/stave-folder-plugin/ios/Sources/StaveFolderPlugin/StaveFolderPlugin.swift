@@ -30,7 +30,7 @@ public class StaveFolderPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func root() -> (url: URL, mode: String) {
         if let cached = cachedRoot {
-            return (cached, cachedScoped ? "folder" : "local")
+            return (cached, cachedScoped ? "folder" : lastMode)
         }
         if let data = UserDefaults.standard.data(forKey: bookmarkKey) {
             var stale = false
@@ -41,16 +41,24 @@ public class StaveFolderPlugin: CAPPlugin, CAPBridgedPlugin {
                 }
                 cachedRoot = url
                 cachedScoped = true
+                lastMode = "folder"
                 return (url, "folder")
             }
-            // Stale/broken bookmark: fall back to local rather than failing.
-            UserDefaults.standard.removeObject(forKey: bookmarkKey)
+            // Bookmark exists but won't resolve: KEEP it and tell the UI —
+            // silently falling back to local storage once hid days of writing.
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            cachedRoot = docs
+            cachedScoped = false
+            lastMode = "folder-lost"
+            return (docs, "folder-lost")
         }
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         cachedRoot = docs
         cachedScoped = false
+        lastMode = "local"
         return (docs, "local")
     }
+    private var lastMode = "local"
 
     private func fileURL(_ rel: String) throws -> URL {
         let clean = rel.split(separator: "/").filter { $0 != ".." && $0 != "." }.joined(separator: "/")
