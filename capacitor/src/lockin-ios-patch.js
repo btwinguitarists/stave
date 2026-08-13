@@ -89,25 +89,47 @@
     return twMark.offsetTop + (parseFloat(cs.paddingTop) || 0)
   }
 
+  // Manual scrolling is sacred: while the writer browses their own page,
+  // recentering waits. Typing re-engages it. Fingers on glass pause the glide.
   let twGoal = null, twGliding = false
+  let twUserScrollAt = 0, twExpected = -1, twTouching = false
+
+  document.addEventListener('scroll', e => {
+    if (!e.target || e.target.id !== 'editor') return
+    // Position, not timing, tells us whose scroll this is: the glide always
+    // records exactly where it wrote; anything else is the writer's hand.
+    if (Math.abs(e.target.scrollTop - twExpected) > 4) {
+      twUserScrollAt = Date.now()
+      twGoal = null  // kill any in-flight glide: the writer's hand wins
+    }
+  }, { capture: true, passive: true })
+  document.addEventListener('touchstart', e => {
+    if (e.target && e.target.id === 'editor') twTouching = true
+  }, { capture: true, passive: true })
+  document.addEventListener('touchend', () => { twTouching = false }, { capture: true, passive: true })
+  document.addEventListener('touchcancel', () => { twTouching = false }, { capture: true, passive: true })
+
   function twGlide() {
     const ed = document.getElementById('editor')
-    if (!ed || twGoal === null || localStorage.getItem('stave-typewriter') !== 'on') {
+    if (!ed || twGoal === null || twTouching ||
+        localStorage.getItem('stave-typewriter') !== 'on') {
       twGliding = false
       return
     }
     const diff = twGoal - ed.scrollTop
     if (Math.abs(diff) < 0.75) {
+      twExpected = twGoal
       ed.scrollTop = twGoal
       twGliding = false
       return
     }
-    ed.scrollTop = ed.scrollTop + diff * 0.18
+    twExpected = ed.scrollTop + diff * 0.18
+    ed.scrollTop = twExpected
     setTimeout(twGlide, 16)  // not rAF: frame callbacks stall in keyboard transitions
   }
 
   let twTimer = 0
-  function typewriterScroll() {
+  function typewriterScroll(force) {
     if (localStorage.getItem('stave-typewriter') !== 'on') return
     clearTimeout(twTimer)
     twTimer = setTimeout(() => {
@@ -117,6 +139,11 @@
       // anchors its callout menu to the word, and typewriter tracking the
       // INSERTION point is the native behavior anyway.
       if (ed.selectionStart !== ed.selectionEnd) return
+      // Browsing grace: a caret tap doesn't recenter for a while after a
+      // manual scroll (ending a scroll with a tap IS a caret move on iOS).
+      // Typing always recenters.
+      if (force) twUserScrollAt = 0
+      else if (Date.now() - twUserScrollAt < 1500) return
       const caretY = caretTop(ed)
       let visible = ed.clientHeight
       if (window.visualViewport) {
@@ -220,19 +247,20 @@
     toolbar.appendChild(more)
   }
   // Delegated on document so it survives lockin re-creating the editor node.
+  // Typing forces recentering (ends any browsing grace); caret taps respect it.
   for (const ev of ['input', 'keyup']) {
     document.addEventListener(ev, e => {
-      if (e.target && e.target.id === 'editor') typewriterScroll()
+      if (e.target && e.target.id === 'editor') typewriterScroll(true)
     }, { passive: true })
   }
   document.addEventListener('focusin', e => {
-    if (e.target && e.target.id === 'editor') typewriterScroll()
+    if (e.target && e.target.id === 'editor') typewriterScroll(true)
   })
   // NOT 'click': it fires before WebKit finishes placing the caret, so it
   // centers the PREVIOUS line. selectionchange fires after the caret lands.
   document.addEventListener('selectionchange', () => {
     const ed = document.getElementById('editor')
-    if (ed && document.activeElement === ed) typewriterScroll()
+    if (ed && document.activeElement === ed) typewriterScroll(false)
   })
 
   // Touch exit button (Escape on Mac).
