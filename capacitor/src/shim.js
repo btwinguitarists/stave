@@ -33,7 +33,6 @@ const StaveFS = {
   _listeners: [],
 
   async init() {
-    // Replay any writes a previous page unload dropped before native ack.
     let journal = {}
     try { journal = JSON.parse(localStorage.getItem('stave-pending-writes') || '{}') } catch (e) {}
 
@@ -49,7 +48,23 @@ const StaveFS = {
       try { this.cache = JSON.parse(localStorage.getItem('stave-dev-fs') || '{}') } catch (e) { this.cache = {} }
     }
 
-    for (const [rel, content] of Object.entries(journal)) this.write(rel, content)
+    // Replay writes whose native ack was lost — GUARDED. A journal entry
+    // only replays if it's genuinely newer than the file on disk; anything
+    // else purges. (An unguarded replay once resurrected a page's day-one
+    // stub over days of writing, on every launch, forever.)
+    const MAX_AGE = 48 * 3600 * 1000
+    for (const [rel, raw] of Object.entries(journal)) {
+      const entry = (raw && typeof raw === 'object' && 'c' in raw) ? raw : { c: raw, t: 0 }
+      const file = this.cache[rel]
+      const fresh = entry.t && (Date.now() - entry.t) < MAX_AGE
+      if (!file && typeof entry.c === 'string' && fresh) {
+        this.write(rel, entry.c)            // rescue a page that never landed
+      } else if (file && fresh && entry.t > file.mtime && entry.c !== file.content) {
+        this.write(rel, entry.c)            // ack was lost; journal is newer
+      } else {
+        this._journal(rel, undefined)       // stale, already landed, or legacy: purge
+      }
+    }
     this.ready = true
     this._listeners.forEach(fn => fn())
   },
@@ -70,7 +85,8 @@ const StaveFS = {
   _journal(rel, content) {
     try {
       const j = JSON.parse(localStorage.getItem('stave-pending-writes') || '{}')
-      if (content === undefined) delete j[rel]; else j[rel] = content
+      if (content === undefined) delete j[rel]
+      else j[rel] = { c: content, t: Date.now() }
       localStorage.setItem('stave-pending-writes', JSON.stringify(j))
     } catch (e) {}
   },
