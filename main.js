@@ -49,6 +49,20 @@ function ensureDirs() {
   })
 }
 
+// An interrupted atomic write leaves a .stave-tmp behind. Anything older
+// than a day is an orphan, never a write in flight.
+function cleanStaleTmpFiles() {
+  const dayAgo = Date.now() - 24 * 60 * 60 * 1000
+  ;[NOTES_DIR, WRITE_DIR, PLAN_DIR, LONGFORM_DIR, PROJECTS_DIR].forEach(d => {
+    try {
+      fs.readdirSync(d).filter(f => f.endsWith('.stave-tmp')).forEach(f => {
+        const p = path.join(d, f)
+        try { if (fs.statSync(p).mtimeMs < dayAgo) fs.unlinkSync(p) } catch(e) {}
+      })
+    } catch(e) {}
+  })
+}
+
 // Foreign-file guard (matches renderer.js). Lockin IPC write handlers
 // use this to refuse any write outside Stave's notes dirs.
 function isInStaveNotesDir(filepath) {
@@ -100,7 +114,12 @@ function createWindow() {
       pendingFilePath = null
     }
   })
-  win.on('blur', () => { if (winMode === 'hide') win.hide() })
+  win.on('blur', () => {
+    // Force the debounced save out before the window hides — a crash or
+    // force-quit after this point can no longer drop the last keystrokes.
+    if (win.webContents && !win.webContents.isDestroyed()) win.webContents.send('flush-save')
+    if (winMode === 'hide') win.hide()
+  })
   win.on('resize', () => {
     const [w, h] = win.getSize()
     savePrefs({ ...loadPrefs(), width: w, height: h })
@@ -274,6 +293,9 @@ function openLockIn(mode, content, title, filepath, recordings) {
     lockInWin.show()
     lockInWin.focus()
     lockInWin.webContents.send('init-lockin', { mode, content, title, filepath, recordings: recordings || [] })
+  })
+  lockInWin.on('blur', () => {
+    if (lockInWin && !lockInWin.isDestroyed()) lockInWin.webContents.send('flush-save')
   })
   lockInWin.on('closed', () => { lockInWin = null })
 }
@@ -745,6 +767,7 @@ app.whenReady().then(() => {
     if (filePath) pendingFilePath = filePath
   }
   ensureDirs()
+  cleanStaleTmpFiles()
   createTray()
   createWindow()
  globalShortcut.register('CommandOrControl+Shift+Space', () => {

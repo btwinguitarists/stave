@@ -4,6 +4,7 @@ const path = require('path')
 const os = require('os')
 const { ipcRenderer } = require('electron')
 const { canWriteOverDisk, classifyExternalUpdate } = require('./sync-guard')
+const history = require('./history')
 
 // ── PATHS ──
 const NOTES_DIR    = path.join(os.homedir(), 'Library', 'Mobile Documents', 'com~apple~CloudDocs', 'Stave')
@@ -673,7 +674,16 @@ function writeTabToDisk(tab) {
         return false
       }
     }
+    // Before a save that loses a big chunk of text, capture what disk had —
+    // whether the loss was intentional or not, it stays recoverable.
+    if (current && history.isBigShrink({
+      previousLength: current.content.length,
+      nextLength: serialized.length
+    })) {
+      history.snapshotNow(tab.filepath, current.content)
+    }
     atomicWriteFileSync(tab.filepath, serialized)
+    history.maybeSnapshot(tab.filepath, serialized)
     const written = readFileSnapshot(tab.filepath)
     if (written) {
       rememberDiskSnapshot(tab, written)
@@ -682,6 +692,8 @@ function writeTabToDisk(tab) {
     return true
   } catch(e) {
     console.error('[writeTabToDisk] failed:', e)
+    tab.syncNotice = '⚠ save failed — check disk'
+    updateNoteMeta(tab)
     return false
   }
 }
@@ -2510,6 +2522,7 @@ function init() {
   bindIPC()
   startDiskSyncMonitor()
   rescheduleReminders()
+  setTimeout(() => history.pruneHistory(), 5000)
 }
 
 init()

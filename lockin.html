@@ -353,6 +353,17 @@
       opacity: 0; transition: opacity 0.3s;
     }
 
+    #save-notice {
+      position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px; color: var(--text2);
+      background: var(--bg2, #252528); border: 0.5px solid var(--border2, rgba(255,255,255,0.13));
+      border-radius: 6px; padding: 7px 14px;
+      opacity: 0; pointer-events: none; transition: opacity 0.3s;
+      z-index: 400;
+    }
+    #save-notice.show { opacity: 1; }
+
     #width-switcher {
       display: flex; gap: 6px; justify-content: flex-end; margin-bottom: 12px;
     }
@@ -446,6 +457,8 @@
       <textarea id="editor" placeholder="write..."></textarea>
     </div>
 
+    <div id="save-notice"></div>
+
     <div id="right-panel">
       <div id="word-count">0 words</div>
       <div id="room-flash"></div>
@@ -511,9 +524,17 @@
     const path = require('path')
     const os = require('os')
 
+    // Mac-only save protection (version history + conflict handling).
+    // The iOS shim doesn't ship these modules; there the native write
+    // journal already covers this ground.
+    let syncHistory = null
+    try { syncHistory = require('./history') } catch(e) {}
+
     let currentRoom = 'stave'
     let outlineVisible = false
     let currentFilepath = null
+    let lastDiskRaw = null
+    let saveNoticeTimer = null
     let saveTimer = null
     let currentMode = 'write'
     let fmtModes = {}
@@ -860,6 +881,10 @@
     ipcRenderer.on('init-lockin', (event, { mode, content, title, filepath, recordings }) => {
       currentMode = mode
       currentFilepath = filepath
+      lastDiskRaw = null
+      if (syncHistory && filepath) {
+        try { lastDiskRaw = fs.readFileSync(filepath, 'utf8') } catch(e) {}
+      }
       document.getElementById('doc-title').textContent = title || 'untitled'
       document.getElementById('editor').value = content || ''
       document.getElementById('editor').focus()
@@ -1294,10 +1319,43 @@
       }
     }
 
+    function conflictCopyPath(filepath) {
+      const d = new Date()
+      const p = n => String(n).padStart(2, '0')
+      const stamp = `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`
+      const base = path.basename(filepath).replace(/\.md$/, '')
+      return path.join(path.dirname(filepath), `${base} (sync conflict ${stamp}).md`)
+    }
+
+    function showSaveNotice(text) {
+      const el = document.getElementById('save-notice')
+      if (!el) return
+      el.textContent = text
+      el.classList.add('show')
+      clearTimeout(saveNoticeTimer)
+      saveNoticeTimer = setTimeout(() => el.classList.remove('show'), 6000)
+    }
+
     function saveNow() {
       if (!currentFilepath) return
       try {
-        const raw = fs.readFileSync(currentFilepath, 'utf8')
+        let raw
+        try { raw = fs.readFileSync(currentFilepath, 'utf8') } catch(e) {
+          // Transient missing file (iCloud placeholder) — never rebuild it
+          // from a splice over nothing. Try again on the next keystroke.
+          if (syncHistory) showSaveNotice('waiting for file — save paused')
+          return
+        }
+
+        // Another device rewrote this note while the room was open. The
+        // words being typed here win, but the other copy is kept — in
+        // history and as a visible sibling note.
+        if (syncHistory && lastDiskRaw !== null && raw !== lastDiskRaw) {
+          syncHistory.snapshotNow(currentFilepath, raw)
+          ipcRenderer.send('lockin-save', { filepath: conflictCopyPath(currentFilepath), content: raw })
+          showSaveNotice('newer copy from another device — saved alongside this note')
+        }
+
         const content = document.getElementById('editor').value
         let updated
 
@@ -1313,7 +1371,12 @@
             updated = raw.replace(/(## admin\n)([\s\S]*)/, '$1' + content + '\n')
         }
 
+        if (syncHistory && syncHistory.isBigShrink({ previousLength: raw.length, nextLength: updated.length })) {
+          syncHistory.snapshotNow(currentFilepath, raw)
+        }
         ipcRenderer.send('lockin-save', { filepath: currentFilepath, content: updated })
+        lastDiskRaw = updated
+        if (syncHistory) syncHistory.maybeSnapshot(currentFilepath, updated)
       } catch(e) {}
     }
 
