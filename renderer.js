@@ -2481,7 +2481,9 @@ function openNote(filename, mode) {
 // DAILY PAGE — one note per day, opened each morning to look back
 // ════════════════════════════════════════
 
-const DAILY_TEMPLATE = 'yesterday:\n- \n\nread:\n- \n\n'
+// yesterday = short notes on what happened; reading = this morning's Bible
+// reading, jotted at journaling time — not a look-back.
+const DAILY_TEMPLATE = 'yesterday:\n- \n\nreading:\n- \n\n'
 
 function todayDailyTitle(d = new Date()) {
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
