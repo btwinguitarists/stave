@@ -3,6 +3,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const { ipcRenderer } = require('electron')
+const { canWriteOverDisk, classifyExternalUpdate } = require('./sync-guard')
 
 // ── PATHS ──
 const NOTES_DIR    = path.join(os.homedir(), 'Library', 'Mobile Documents', 'com~apple~CloudDocs', 'Stave')
@@ -87,6 +88,34 @@ let currentAudio = null
 let lastWriteTabIndex = -1
 let lastPlanTabIndex  = -1
 let lastAdminSelection = { start: 0, end: 0 }
+let diskSyncTimer = null
+
+function readFileSnapshot(filepath) {
+  try {
+    const stat = fs.statSync(filepath)
+    return {
+      content: fs.readFileSync(filepath, 'utf8'),
+      mtimeMs: stat.mtimeMs,
+      size: stat.size
+    }
+  } catch(e) {
+    return null
+  }
+}
+
+function rememberDiskSnapshot(tab, snapshot) {
+  if (!tab || !snapshot) return
+  tab.lastDiskContent = snapshot.content
+  tab.lastDiskFingerprint = { mtimeMs: snapshot.mtimeMs, size: snapshot.size }
+  tab.lastSavedContent = serializeTab(tab)
+  tab.externalConflict = null
+}
+
+function updateNoteMeta(tab) {
+  const meta = document.getElementById('note-meta')
+  if (!meta) return
+  meta.textContent = tab?.syncNotice || (tab?.filepath ? formatMeta(tab.filepath) : '')
+}
 
 // ════════════════════════════════════════
 // LIBRARIES
@@ -351,7 +380,14 @@ function emptyTab(mode) {
     mode: mode || newTabMode,
     title: '', idea: '', context: '', tags: [],
     planContext: '', admin: '', tasks: [],
-    phases: [], links: [], recordings: []
+    phases: [], links: [], recordings: [],
+    // Disk freshness is part of the tab's save contract. These fields are
+    // intentionally not serialized into the note itself.
+    lastDiskContent: undefined,
+    lastDiskFingerprint: null,
+    lastSavedContent: undefined,
+    externalConflict: null,
+    syncNotice: null
   }
 }
 
@@ -522,32 +558,151 @@ function getNotesList(mode) {
 function loadNoteAsTab(filename, mode) {
   const dir = getDirForMode(mode)
   const filepath = path.join(dir, filename)
-  if (!fs.existsSync(filepath)) return null
-  const raw = fs.readFileSync(filepath, 'utf8')
+  const snapshot = readFileSnapshot(filepath)
+  if (!snapshot) return null
   const tab = emptyTab(mode)
   tab.filename = filename
   tab.filepath = filepath
-  Object.assign(tab, parseNote(raw, mode))
+  Object.assign(tab, parseNote(snapshot.content, mode))
+  rememberDiskSnapshot(tab, snapshot)
   return tab
 }
 
-function writeTabToDisk(tab) {
-  if (!tab || !tab.filepath) return
+function recoverLocalCopy(tab) {
+  if (!tab?.filepath || !isInStaveNotesDir(tab.filepath)) return null
+  const base = path.basename(tab.filename || 'note', '.md')
+    .replace(/[^a-z0-9_-]+/gi, '-').replace(/-+/g, '-') || 'note'
+  const stamp = new Date().toISOString().replace(/[.:]/g, '-').replace('T', '_').replace('Z', '')
+  let filename = `${base} (Mac recovery ${stamp}).md`
+  let filepath = path.join(path.dirname(tab.filepath), filename)
+  let suffix = 2
+  while (fs.existsSync(filepath)) {
+    filename = `${base} (Mac recovery ${stamp}-${suffix++}).md`
+    filepath = path.join(path.dirname(tab.filepath), filename)
+  }
   try {
+    atomicWriteFileSync(filepath, serializeTab({ ...tab, filename, filepath }))
+    return filename
+  } catch(e) {
+    console.error('[sync] could not preserve local recovery copy:', e)
+    return null
+  }
+}
+
+function applyExternalSnapshot(tab, snapshot, notice) {
+  if (!tab || !snapshot) return false
+  const filename = tab.filename
+  const filepath = tab.filepath
+  Object.assign(tab, parseNote(snapshot.content, tab.mode))
+  tab.filename = filename
+  tab.filepath = filepath
+  tab.syncNotice = notice || null
+  rememberDiskSnapshot(tab, snapshot)
+  tab.syncNotice = notice || null
+
+  const index = tabs.indexOf(tab)
+  if (index === currentTabIndex) {
+    clearTimeout(saveTimer)
+    loadTabIntoDOM(tab, { focus: false })
+    renderTabBar()
+  }
+  return true
+}
+
+function handleExternalFileChange(tab, snapshot) {
+  if (!tab || !snapshot) return false
+  const localContent = serializeTab(tab)
+  const decision = classifyExternalUpdate({
+    currentDiskContent: snapshot.content,
+    lastDiskContent: tab.lastDiskContent,
+    localContent,
+    lastSavedContent: tab.lastSavedContent
+  })
+
+  if (decision === 'unchanged') {
+    tab.lastDiskFingerprint = { mtimeMs: snapshot.mtimeMs, size: snapshot.size }
+    return true
+  }
+  if (decision === 'already-local') return applyExternalSnapshot(tab, snapshot)
+
+  clearTimeout(saveTimer)
+  if (decision === 'reload') {
+    return applyExternalSnapshot(tab, snapshot, 'updated from iCloud')
+  }
+
+  const recovery = recoverLocalCopy(tab)
+  if (!recovery) {
+    tab.externalConflict = { snapshot }
+    tab.syncNotice = 'newer copy found - saving paused'
+    updateNoteMeta(tab)
+    return false
+  }
+  return applyExternalSnapshot(tab, snapshot, `newer copy loaded - Mac edits saved as ${recovery}`)
+}
+
+function writeTabToDisk(tab) {
+  if (!tab || !tab.filepath || tab.externalConflict) return false
+  try {
+    const serialized = serializeTab(tab)
+    const current = readFileSnapshot(tab.filepath)
+
+    // A missing file may be a transient iCloud placeholder. Never recreate it
+    // from an old tab snapshot; wait for the next poll instead.
+    if (!current && tab.lastDiskContent !== undefined) {
+      tab.syncNotice = 'waiting for iCloud file'
+      updateNoteMeta(tab)
+      return false
+    }
+    if (current && !canWriteOverDisk({
+      currentDiskContent: current.content,
+      lastDiskContent: tab.lastDiskContent
+    })) {
+      handleExternalFileChange(tab, current)
+      return false
+    }
+
     // Last-line guard: refuse to overwrite a non-trivial file with an empty
     // tab. Catches the foreign-file clobber path even if both upstream gates fail.
-    if (fs.existsSync(tab.filepath)) {
-      const existingSize = fs.statSync(tab.filepath).size
+    if (current) {
+      const existingSize = current.size
       if (existingSize > 500 && !tabHasContent(tab)) {
         console.error(
           `[writeTabToDisk] REFUSED: tab has no content but existing file is ${existingSize}B. ` +
           `Path: ${tab.filepath}. This is almost always a foreign-file clobber.`
         )
-        return
+        return false
       }
     }
-    atomicWriteFileSync(tab.filepath, serializeTab(tab))
-  } catch(e) { console.error('[writeTabToDisk] failed:', e) }
+    atomicWriteFileSync(tab.filepath, serialized)
+    const written = readFileSnapshot(tab.filepath)
+    if (written) {
+      rememberDiskSnapshot(tab, written)
+      tab.syncNotice = null
+    }
+    return true
+  } catch(e) {
+    console.error('[writeTabToDisk] failed:', e)
+    return false
+  }
+}
+
+function syncOpenTabsFromDisk() {
+  tabs.forEach(tab => {
+    if (!tab?.filepath || tab.lastDiskContent === undefined) return
+    const snapshot = readFileSnapshot(tab.filepath)
+    if (!snapshot) return
+    if (snapshot.content === tab.lastDiskContent) {
+      tab.lastDiskFingerprint = { mtimeMs: snapshot.mtimeMs, size: snapshot.size }
+      return
+    }
+    handleExternalFileChange(tab, snapshot)
+  })
+}
+
+function startDiskSyncMonitor() {
+  if (diskSyncTimer) return
+  diskSyncTimer = setInterval(syncOpenTabsFromDisk, 1500)
+  if (typeof diskSyncTimer.unref === 'function') diskSyncTimer.unref()
 }
 
 function formatDateTitle(d) {
@@ -650,6 +805,7 @@ function saveCurrentTab() {
 function autoSave() {
   if (isSwitching) return
   syncTabFromDOM()
+  if (tabs[currentTabIndex]?.externalConflict) return
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     if (isSwitching) return
@@ -716,10 +872,10 @@ function switchTab(index) {
   setTimeout(() => { isSwitching = false }, 300)
 }
 
-function loadTabIntoDOM(tab) {
+function loadTabIntoDOM(tab, { focus = true } = {}) {
   if (!tab) return
   document.getElementById('note-title').value = tab.title || ''
-  document.getElementById('note-meta').textContent = tab.filepath ? formatMeta(tab.filepath) : ''
+  updateNoteMeta(tab)
 
   const isWriteLike = tab.mode === 'write' || tab.mode === 'longform'
   document.getElementById('panel-write').classList.toggle('active', isWriteLike)
@@ -732,12 +888,12 @@ function loadTabIntoDOM(tab) {
     renderTagsFromArray(tab.tags || [])
     updateSyllableOverlay()
     if (recordingsOpen) renderRecordingsPanel()
-    setTimeout(() => document.getElementById('idea-area').focus(), 50)
+    if (focus) setTimeout(() => document.getElementById('idea-area').focus(), 50)
   } else {
     document.getElementById('plan-context-input').value = tab.planContext || ''
     document.getElementById('admin-area').value = tab.admin || ''
     renderTasks(tab.tasks || [])
-    setTimeout(() => document.getElementById('admin-area').focus(), 50)
+    if (focus) setTimeout(() => document.getElementById('admin-area').focus(), 50)
   }
 }
 
@@ -2052,10 +2208,12 @@ function bindIPC() {
     if (idx < 0) return
     const dir = getDirForMode(mode)
     const filepath = path.join(dir, filename)
-    if (!fs.existsSync(filepath)) return
-    const raw = fs.readFileSync(filepath, 'utf8')
-    Object.assign(tabs[idx], parseNote(raw, mode))
-    if (idx === currentTabIndex) loadTabIntoDOM(tabs[idx])
+    const snapshot = readFileSnapshot(filepath)
+    if (!snapshot) return
+    const tab = tabs[idx]
+    Object.assign(tab, parseNote(snapshot.content, mode))
+    rememberDiskSnapshot(tab, snapshot)
+    if (idx === currentTabIndex) loadTabIntoDOM(tab, { focus: false })
   })
 
   ipcRenderer.on('lockin-closed', (event, updatedContent) => {
@@ -2127,8 +2285,9 @@ function bindIPC() {
 
   ipcRenderer.on('open-file-path', (event, filePath) => {
     try {
-      if (!filePath || !fs.existsSync(filePath)) return
-      const raw = fs.readFileSync(filePath, 'utf8')
+      const snapshot = filePath ? readFileSnapshot(filePath) : null
+      if (!snapshot) return
+      const raw = snapshot.content
       const inside    = isInStaveNotesDir(filePath)
       const staveNote = looksLikeStaveNote(raw)
 
@@ -2153,6 +2312,7 @@ function bindIPC() {
         tab.filename = path.basename(filePath)
         tab.filepath = filePath
         Object.assign(tab, parseNote(raw, mode))
+        rememberDiskSnapshot(tab, snapshot)
       } else {
         // Foreign file — import the content into a NEW note under WRITE_DIR.
         // Never attach the tab to the source; any autosave would destroy it.
@@ -2168,7 +2328,7 @@ function bindIPC() {
         tab.title    = basename
         tab.idea     = raw
         // Write the imported content immediately so the new note exists on disk
-        fs.writeFileSync(newFilepath, serializeTab(tab), 'utf8')
+        writeTabToDisk(tab)
       }
 
       clearTimeout(saveTimer)
@@ -2324,6 +2484,7 @@ function init() {
       tab.filepath = saved.filepath
       const raw = fs.readFileSync(saved.filepath, 'utf8')
       Object.assign(tab, parseNote(raw, saved.mode))
+      rememberDiskSnapshot(tab, readFileSnapshot(saved.filepath))
       tabs.push(tab)
     })
   }
@@ -2347,6 +2508,7 @@ function init() {
   bindKeys()
   bindSelection()
   bindIPC()
+  startDiskSyncMonitor()
   rescheduleReminders()
 }
 
