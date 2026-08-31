@@ -755,6 +755,26 @@ app.on('open-file', (event, filePath) => {
   }
 })
 
+// The app hides its Dock presence, so macOS treats a Dock/Finder launch as
+// starting it fresh — without this lock that meant a silent second copy
+// racing the first over the same note files. Now the extra launch just
+// summons the existing window.
+const gotInstanceLock = app.requestSingleInstanceLock()
+if (!gotInstanceLock) {
+  app.quit()
+}
+
+function summonWindow() {
+  if (!win || win.isDestroyed()) return
+  positionWindow()
+  app.focus({ steal: true })
+  win.show()
+  win.focus()
+}
+
+app.on('second-instance', () => summonWindow())
+app.on('activate', () => summonWindow())
+
 app.whenReady().then(() => {
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.codyvanscyoc.stave')
