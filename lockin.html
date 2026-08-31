@@ -1371,6 +1371,9 @@
             updated = raw.replace(/(## admin\n)([\s\S]*)/, '$1' + content + '\n')
         }
 
+        // Nothing changed — skip the write so mtimes and iCloud stay quiet.
+        if (updated === raw && raw === lastDiskRaw) return
+
         if (syncHistory && syncHistory.isBigShrink({ previousLength: raw.length, nextLength: updated.length })) {
           syncHistory.snapshotNow(currentFilepath, raw)
         }

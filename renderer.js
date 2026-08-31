@@ -668,6 +668,13 @@ function writeTabToDisk(tab) {
       return false
     }
 
+    // Nothing changed — skip the write so mtimes and iCloud stay quiet.
+    if (current && current.content === serialized) {
+      rememberDiskSnapshot(tab, current)
+      tab.syncNotice = null
+      return true
+    }
+
     // Last-line guard: refuse to overwrite a non-trivial file with an empty
     // tab. Catches the foreign-file clobber path even if both upstream gates fail.
     if (current) {
