@@ -4,7 +4,7 @@
   "description": "A minimal note app for creative and admin thinking",
   "main": "main.js",
   "scripts": {
-    "test": "node test/sync-guard.test.js && node test/history.test.js",
+    "test": "node test/sync-guard.test.js && node test/history.test.js && node test/note-title.test.js",
     "start": "electron .",
     "build": "electron-builder --mac",
     "build:win": "electron-builder --win",
@@ -49,6 +49,7 @@
       "renderer.js",
       "sync-guard.js",
       "history.js",
+      "note-title.js",
       "search.html",
       "reminders.html",
       "lockin.html",

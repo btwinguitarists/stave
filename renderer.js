@@ -5,6 +5,12 @@ const os = require('os')
 const { ipcRenderer } = require('electron')
 const { canWriteOverDisk, classifyExternalUpdate } = require('./sync-guard')
 const history = require('./history')
+const { displayTitleFrom } = require('./note-title')
+
+function displayTitle(tab) {
+  if (!tab) return 'untitled'
+  return displayTitleFrom({ title: tab.title, body: tab.idea || tab.admin })
+}
 
 // ── PATHS ──
 const NOTES_DIR    = path.join(os.homedir(), 'Library', 'Mobile Documents', 'com~apple~CloudDocs', 'Stave')
@@ -738,7 +744,8 @@ function createNoteFile(tab, callback) {
   const filepath = path.join(dir, filename)
   tab.filename = filename
   tab.filepath = filepath
-  if (!tab.title) tab.title = formatDateTitle(now)
+  // No auto date title — lists fall back to the first line of writing,
+  // which says far more than "Thu Aug 13" ever did.
 
   if (tab.mode === 'longform') {
     chooseLongformTemplate(key => {
@@ -806,11 +813,30 @@ function syncTabFromDOM() {
   }
 }
 
+// A tab becomes a file only once it holds real words (or a typed title) —
+// empty tabs never litter the notes folder.
+function persistTab(tab, after) {
+  if (!tab) return
+  if (!tab.filepath) {
+    if (!tabHasContent(tab) && !(tab.title && tab.title.trim())) {
+      if (after) after()
+      return
+    }
+    createNoteFile(tab, after)
+    return
+  }
+  writeTabToDisk(tab)
+  if (after) after()
+}
+
 // Write current tab to disk — reads from tab object, never DOM
 function saveCurrentTab() {
   const tab = tabs[currentTabIndex]
-  if (!tab || !tab.filepath) return
-  writeTabToDisk(tab)
+  if (!tab) return
+  persistTab(tab, () => {
+    renderTabBar()
+    updateNoteMeta(tab)
+  })
 }
 
 // Autosave — syncs DOM to tab object then schedules disk write
@@ -865,7 +891,7 @@ function switchTab(index) {
   syncTabFromDOM()
 
   // 3. Write current tab to disk immediately
-  writeTabToDisk(tabs[currentTabIndex])
+  persistTab(tabs[currentTabIndex])
 
   // 4. Clear DOM to prevent stale content showing
   document.getElementById('note-title').value = ''
@@ -886,7 +912,8 @@ function switchTab(index) {
 
 function loadTabIntoDOM(tab, { focus = true } = {}) {
   if (!tab) return
-  document.getElementById('note-title').value = tab.title || ''
+  // 'untitled' is serialization filler, not a real title — show the placeholder
+  document.getElementById('note-title').value = (tab.title === 'untitled' ? '' : tab.title) || ''
   updateNoteMeta(tab)
 
   const isWriteLike = tab.mode === 'write' || tab.mode === 'longform'
@@ -919,38 +946,34 @@ function newTab() {
 
   // sync and save current tab before creating new one
   syncTabFromDOM()
-  writeTabToDisk(tabs[currentTabIndex])
+  persistTab(tabs[currentTabIndex])
 
+  // No file yet — the note is created on disk the moment it first holds words.
   const tab = emptyTab(newTabMode)
   tabs.push(tab)
   currentTabIndex = tabs.length - 1
 
-  createNoteFile(tab, () => {
-    isSwitching = false
-    loadTabIntoDOM(tab)
-    renderTabBar()
-    saveTabPrefs()
-    document.getElementById('note-title').focus()
-  })
+  isSwitching = false
+  loadTabIntoDOM(tab)
+  renderTabBar()
+  saveTabPrefs()
+  document.getElementById('note-title').focus()
 }
 
 function closeTab(index) {
   clearTimeout(saveTimer)
   syncTabFromDOM()
-  writeTabToDisk(tabs[currentTabIndex])
+  persistTab(tabs[currentTabIndex])
 
   if (tabs.length === 1) {
-    // don't close last tab — just clear it
+    // don't close last tab — just clear it (no file until it holds words)
     isSwitching = true
-    const tab = emptyTab(newTabMode)
-    createNoteFile(tab, () => {
-      tabs[0] = tab
-      currentTabIndex = 0
-      isSwitching = false
-      loadTabIntoDOM(tab)
-      renderTabBar()
-      saveTabPrefs()
-    })
+    tabs[0] = emptyTab(newTabMode)
+    currentTabIndex = 0
+    isSwitching = false
+    loadTabIntoDOM(tabs[0])
+    renderTabBar()
+    saveTabPrefs()
     return
   }
 
@@ -988,7 +1011,7 @@ function renderTabBar() {
 
     const title = document.createElement('div')
     title.className = 'tab-title'
-    title.textContent = tab.title || 'untitled'
+    title.textContent = displayTitle(tab)
 
     const close = document.createElement('div')
     close.className = 'tab-close'
@@ -1507,6 +1530,143 @@ const THEMES = {
 let currentTheme = 'stave'
 let currentFontSize = 13
 
+// ════════════════════════════════════════
+// LIBRARY — every note, one click away
+// ════════════════════════════════════════
+
+function libraryEntries() {
+  const out = []
+  ;['write', 'plan'].forEach(mode => {
+    const dir = getDirForMode(mode)
+    getNotesList(mode).forEach(filename => {
+      const filepath = path.join(dir, filename)
+      const snapshot = readFileSnapshot(filepath)
+      if (!snapshot) return
+      const parsed = parseNote(snapshot.content, mode)
+      const body = (mode === 'plan' ? parsed.admin : parsed.idea) || ''
+      out.push({
+        filename, filepath, mode,
+        title: displayTitleFrom({ title: parsed.title, body }),
+        body,
+        words: body.trim() ? body.trim().split(/\s+/).length : 0,
+        mtimeMs: snapshot.mtimeMs,
+        empty: !tabHasContent({ mode, ...parsed }),
+        open: tabs.some(t => t.filepath === filepath)
+      })
+    })
+  })
+  return out.sort((a, b) => b.mtimeMs - a.mtimeMs)
+}
+
+function formatLibDate(ms) {
+  const d = new Date(ms)
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const s = `${months[d.getMonth()]} ${d.getDate()}`
+  return d.getFullYear() === new Date().getFullYear() ? s : `${s} ${d.getFullYear()}`
+}
+
+function renderLibrary() {
+  const list = document.getElementById('library-list')
+  const filter = document.getElementById('library-filter').value.trim().toLowerCase()
+  list.innerHTML = ''
+
+  let entries = libraryEntries()
+  if (filter) entries = entries.filter(e =>
+    e.title.toLowerCase().includes(filter) || e.body.toLowerCase().includes(filter))
+
+  if (!entries.length) {
+    const none = document.createElement('div')
+    none.id = 'library-none'
+    none.textContent = filter ? 'no notes match' : 'no notes yet — hit + new'
+    list.appendChild(none)
+    return
+  }
+
+  entries.forEach(e => {
+    const row = document.createElement('div')
+    row.className = 'lib-row'
+
+    const dot = document.createElement('div')
+    dot.className = 'lib-dot'
+    dot.style.background = getColorForMode(e.mode)
+
+    const main = document.createElement('div')
+    main.className = 'lib-main'
+    const title = document.createElement('div')
+    title.className = 'lib-title'
+    title.textContent = e.title
+    const meta = document.createElement('div')
+    meta.className = 'lib-meta'
+    meta.textContent = formatLibDate(e.mtimeMs) + (e.words ? ` · ${e.words} words` : '')
+    if (e.empty) meta.innerHTML += ' · <span class="lib-empty-mark">empty</span>'
+    if (e.open)  meta.innerHTML += ' · <span class="lib-open-mark">open</span>'
+    main.appendChild(title); main.appendChild(meta)
+
+    // Two-tap delete: first tap arms, second moves the note to the macOS
+    // Trash (still recoverable there, and a final snapshot lands in history).
+    const trash = document.createElement('button')
+    trash.className = 'lib-trash'
+    trash.textContent = '×'
+    trash.onclick = ev => {
+      ev.stopPropagation()
+      if (!trash.classList.contains('confirm')) {
+        list.querySelectorAll('.lib-trash.confirm').forEach(b => {
+          b.classList.remove('confirm'); b.textContent = '×'
+        })
+        trash.classList.add('confirm')
+        trash.textContent = 'delete?'
+        return
+      }
+      trashNote(e)
+    }
+
+    row.appendChild(dot); row.appendChild(main); row.appendChild(trash)
+    row.onclick = () => { closeLibrary(); openNote(e.filename, e.mode) }
+    list.appendChild(row)
+  })
+}
+
+function trashNote(e) {
+  const snapshot = readFileSnapshot(e.filepath)
+  if (snapshot) history.snapshotNow(e.filepath, snapshot.content)
+  require('electron').shell.trashItem(e.filepath).then(() => {
+    const idx = tabs.findIndex(t => t.filepath === e.filepath)
+    if (idx !== -1) {
+      clearTimeout(saveTimer)
+      const wasCurrent = idx === currentTabIndex
+      tabs.splice(idx, 1)
+      if (idx < currentTabIndex) currentTabIndex--
+      if (!tabs.length) tabs.push(emptyTab(newTabMode))
+      if (currentTabIndex >= tabs.length) currentTabIndex = tabs.length - 1
+      if (wasCurrent) {
+        isSwitching = true
+        loadTabIntoDOM(tabs[currentTabIndex], { focus: false })
+        setTimeout(() => { isSwitching = false }, 300)
+      }
+      renderTabBar()
+      saveTabPrefs()
+    }
+    renderLibrary()
+  }).catch(err => console.error('[library] trash failed:', err))
+}
+
+function openLibrary() {
+  document.getElementById('library-overlay').classList.add('open')
+  const f = document.getElementById('library-filter')
+  f.value = ''
+  renderLibrary()
+  setTimeout(() => f.focus(), 30)
+}
+
+function closeLibrary() {
+  document.getElementById('library-overlay').classList.remove('open')
+}
+
+function toggleLibrary() {
+  if (document.getElementById('library-overlay').classList.contains('open')) closeLibrary()
+  else openLibrary()
+}
+
 function openSettings() {
   document.getElementById('settings-overlay').classList.add('open')
   document.getElementById('settings-path-display').textContent = NOTES_DIR
@@ -1540,6 +1700,13 @@ function changeFontSize(delta) {
 function revealInFinder() {
   const { shell } = require('electron')
   shell.openPath(NOTES_DIR)
+}
+
+function revealHistoryInFinder() {
+  const { shell } = require('electron')
+  const root = history.historyRoot()
+  try { fs.mkdirSync(root, { recursive: true }) } catch(e) {}
+  shell.openPath(root)
 }
 
 function saveSettings() {
@@ -2057,12 +2224,20 @@ function cycleWinMode() {
   ipcRenderer.send('set-win-mode', winModeState)
 }
 
+const WIN_MODE_LABELS = { hide: 'auto-hide', float: 'pin on top', free: 'window' }
+const WIN_MODE_HINTS  = {
+  hide:  'auto-hide: the window vanishes when you click away (click to change)',
+  float: 'pin on top: stays visible over other apps (click to change)',
+  free:  'window: behaves like a normal app window (click to change)'
+}
+
 function updateWinModeBtns() {
   const active = winModeState !== 'hide'
   ;['win-mode-btn','win-mode-btn-plan'].forEach(id => {
     const btn = document.getElementById(id)
     if (!btn) return
-    btn.textContent = winModeState
+    btn.textContent = WIN_MODE_LABELS[winModeState] || winModeState
+    btn.title = WIN_MODE_HINTS[winModeState] || ''
     btn.classList.toggle('active', active)
   })
 }
@@ -2077,7 +2252,10 @@ function openLockIn() {
 
   clearTimeout(saveTimer)
   syncTabFromDOM()
-  writeTabToDisk(tab)
+  // The room saves straight to the file, so entering it forces the file to
+  // exist even for a still-empty tab.
+  if (!tab.filepath) createNoteFile(tab, () => {})
+  else writeTabToDisk(tab)
 
   if (tab.mode === 'plan') {
     const planTabs = tabs
@@ -2099,7 +2277,7 @@ function openLockIn() {
     ipcRenderer.send('open-lockin', {
       mode:       tab.mode,
       content:    tab.idea || '',
-      title:      tab.title,
+      title:      displayTitle(tab),
       filepath:   tab.filepath,
       recordings: tab.recordings || []
     })
@@ -2190,21 +2368,34 @@ function getTemplateContent(key) {
 // IPC LISTENERS
 // ════════════════════════════════════════
 
+// Open a note from any list (tray, search, library). If it's already an
+// open tab, switch to it instead of opening a duplicate.
+function openNote(filename, mode) {
+  const existing = tabs.findIndex(t => t.filename === filename && t.mode === mode)
+  if (existing !== -1) {
+    newTabMode = mode
+    switchTab(existing)
+    renderTabBar()
+    return true
+  }
+  const tab = loadNoteAsTab(filename, mode)
+  if (!tab) return false
+  clearTimeout(saveTimer)
+  syncTabFromDOM()
+  persistTab(tabs[currentTabIndex])
+  tabs.push(tab)
+  currentTabIndex = tabs.length - 1
+  newTabMode = mode
+  isSwitching = false
+  loadTabIntoDOM(tab)
+  renderTabBar()
+  saveTabPrefs()
+  return true
+}
+
 function bindIPC() {
   ipcRenderer.on('load-note', (event, { filename, mode }) => {
-    const tab = loadNoteAsTab(filename, mode)
-    if (tab) {
-      clearTimeout(saveTimer)
-      syncTabFromDOM()
-      writeTabToDisk(tabs[currentTabIndex])
-      tabs.push(tab)
-      currentTabIndex = tabs.length - 1
-      newTabMode = mode
-      isSwitching = false
-      loadTabIntoDOM(tab)
-      renderTabBar()
-      saveTabPrefs()
-    }
+    openNote(filename, mode)
   })
 
   ipcRenderer.on('new-note', (event, mode) => {
@@ -2240,7 +2431,7 @@ function bindIPC() {
       tab.admin = updatedContent
       document.getElementById('admin-area').value = updatedContent
     }
-    writeTabToDisk(tab)
+    persistTab(tab)
   })
 
   ipcRenderer.on('lockin-plan-closed', (event, data) => {
@@ -2417,8 +2608,10 @@ function bindKeys() {
   document.getElementById('admin-area').addEventListener('keydown', handleBullet)
 
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { closeDrawer(); closeReminder(); hideMarkdownHint(); closeSettings() }
+    if (e.key === 'Escape') { closeDrawer(); closeReminder(); hideMarkdownHint(); closeSettings(); closeLibrary() }
     if (e.key === 'f' && e.metaKey) { e.preventDefault(); openSearch() }
+    if (e.key === 'l' && e.metaKey) { e.preventDefault(); toggleLibrary() }
+    if (e.key === 'w' && e.metaKey) { e.preventDefault(); closeTab(currentTabIndex) }
     if (e.key === 'r' && e.metaKey) { e.preventDefault(); openReminders() }
     if (e.key === 'b' && e.metaKey) { e.preventDefault(); fmtToggle('**') }
     if (e.key === 'i' && e.metaKey) { e.preventDefault(); fmtToggle('_') }
@@ -2450,6 +2643,7 @@ function bindKeys() {
     if (tabs[currentTabIndex]) tabs[currentTabIndex].title = document.getElementById('note-title').value
     autoSave()
   })
+  document.getElementById('library-filter').addEventListener('input', renderLibrary)
 }
 
 // ════════════════════════════════════════
@@ -2477,7 +2671,8 @@ function init() {
   loadSettings()
 
   const prefs = loadPrefs()
-  if (prefs.winMode) { winModeState = prefs.winMode; updateWinModeBtns() }
+  if (prefs.winMode) winModeState = prefs.winMode
+  updateWinModeBtns()
 
   // restore tabs from prefs
   const savedTabs = prefs.tabs || []
@@ -2506,7 +2701,7 @@ function init() {
     const planFiles  = getNotesList('plan')
     if (writeFiles.length > 0) { const tab = loadNoteAsTab(writeFiles[0], 'write'); if (tab) tabs.push(tab) }
     if (planFiles.length > 0)  { const tab = loadNoteAsTab(planFiles[0],  'plan');  if (tab) tabs.push(tab) }
-    if (tabs.length === 0)     { const tab = emptyTab('write'); createNoteFile(tab, () => {}); tabs.push(tab) }
+    if (tabs.length === 0)     { tabs.push(emptyTab('write')) }
   }
 
   currentTabIndex = Math.min(prefs.currentTabIndex || 0, tabs.length - 1)

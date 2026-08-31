@@ -4,6 +4,7 @@ const fs = require('fs')
 const os = require('os')
 const nspell = require('nspell')
 const dictionaryEn = require('dictionary-en')
+const { displayTitleFromRaw } = require('./note-title')
 
 let speller = null
 dictionaryEn((err, dict) => {
@@ -190,12 +191,7 @@ function formatNoteLabel(filename, mode) {
   try {
     const dir = mode === 'write' ? WRITE_DIR : PLAN_DIR
     const raw = fs.readFileSync(path.join(dir, filename), 'utf8')
-    const titleLine = raw.split('\n').find(l => l.startsWith('# '))
-    const title = titleLine ? titleLine.slice(2).trim() : ''
-    const stat = fs.statSync(path.join(dir, filename))
-    const d = new Date(stat.mtime)
-    const dateStr = `${(d.getMonth()+1).toString().padStart(2,'0')}/${d.getDate().toString().padStart(2,'0')}/${d.getFullYear().toString().slice(2)}`
-    const label = title || dateStr
+    const label = displayTitleFromRaw(raw)
     return `${mode === 'write' ? '✦' : '◆'} ${label.slice(0, 32)}`
   } catch(e) { return filename.replace('.md','') }
 }
@@ -468,9 +464,8 @@ ipcMain.on('get-all-notes', (event) => {
   const all = [...writeNotes, ...planNotes, ...projectNotes].map(n => {
     try {
       const raw = fs.readFileSync(path.join(n.dir, n.filename), 'utf8')
-const titleLine = raw.split('\n').find(l => l.startsWith('# '))
 const typeLine = raw.split('\n').find(l => l.startsWith('type: '))
-const title = titleLine ? titleLine.slice(2).trim() : n.filename.replace('.md','')
+const title = displayTitleFromRaw(raw)
 const noteMode = typeLine ? typeLine.slice(5).trim() : n.mode
 const stat = fs.statSync(path.join(n.dir, n.filename))
 return { filename: n.filename, mode: noteMode, filepath: path.join(n.dir, n.filename), title, raw, mtime: stat.mtime }
