@@ -172,6 +172,9 @@ function buildTrayMenu() {
     { label: 'plan notes', enabled: false },
     ...planNotes,
     { type: 'separator' },
+    { label: "Today's Page", click: () => {
+      if (win) { win.webContents.send('daily-page'); if (!win.isVisible()) toggleWindow() }
+    }},
     { label: 'New Write Note', click: () => {
       if (win) { win.webContents.send('new-note', 'write'); if (!win.isVisible()) toggleWindow() }
     }},

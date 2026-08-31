@@ -672,10 +672,14 @@
       const fpath = path.join(LOCKIN_RECORDINGS_DIR, filename)
       if (!fs.existsSync(fpath)) return
       const data = fs.readFileSync(fpath)
-      const blob = new Blob([data], { type: 'audio/webm' })
+      const type = /\.(m4a|mp4|aac)$/i.test(filename) ? 'audio/mp4'
+                 : /\.mp3$/i.test(filename) ? 'audio/mpeg'
+                 : /\.wav$/i.test(filename) ? 'audio/wav'
+                 : 'audio/webm'
+      const blob = new Blob([data], { type })
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
-      audio.play()
+      audio.play().catch(e => console.error('[lockin] playback failed:', filename, e))
     }
 
     function syncLockinRecordings() {

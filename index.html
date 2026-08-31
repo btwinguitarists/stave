@@ -139,6 +139,15 @@
 
     #tab-add:hover { color: var(--accent); }
 
+    #tab-today {
+      font-size: 10px; letter-spacing: 0.05em; color: var(--text3);
+      background: transparent; border: none; cursor: pointer;
+      padding: 0 10px; height: 34px; flex-shrink: 0; outline: none;
+      transition: color 0.15s; font-family: 'JetBrains Mono', monospace;
+      margin-left: auto;
+    }
+    #tab-today:hover { color: var(--accent); }
+
     /* ── NOTE META ── */
     #note-meta-bar {
       padding: 5px 13px; border-bottom: 0.5px solid var(--border);
@@ -745,6 +754,7 @@
   <!-- TAB BAR -->
   <div id="tab-bar">
     <button id="tab-add" onclick="newTab()" title="new tab (⌘T)">+</button>
+    <button id="tab-today" onclick="openDailyPage()" title="today's page (⌘D)">today</button>
   </div>
 
   <div id="note-meta-bar">
@@ -947,6 +957,7 @@
           <span class="settings-sc-key">1. space</span><span class="settings-sc-val">numbered</span>
           <span class="settings-sc-key">⌘L</span><span class="settings-sc-val">all notes</span>
           <span class="settings-sc-key">⌘W</span><span class="settings-sc-val">close tab</span>
+          <span class="settings-sc-key">⌘D</span><span class="settings-sc-val">today's page</span>
           <span class="settings-sc-key">Esc</span><span class="settings-sc-val">close / exit lock in</span>
           <span class="settings-sc-key"></span><span class="settings-sc-val"></span>
         </div>

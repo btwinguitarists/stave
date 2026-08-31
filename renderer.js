@@ -1850,7 +1850,60 @@ function renderRecordingsPanel() {
   addBtn.textContent = '+'
   addBtn.onclick = addRecordingSlot
   inner.appendChild(addBtn)
+
+  // Record in Voice Memos (background recording + transcription), then
+  // drag the memo onto this note to attach it.
+  const vmBtn = document.createElement('button')
+  vmBtn.className = 'rec-add-btn'
+  vmBtn.style.width = 'auto'
+  vmBtn.style.fontSize = '9px'
+  vmBtn.textContent = 'voice memos ↗'
+  vmBtn.title = 'record there, then drag the memo onto this note to attach it'
+  vmBtn.onclick = () => require('electron').shell.openPath('/System/Applications/VoiceMemos.app')
+  inner.appendChild(vmBtn)
+
   panel.appendChild(inner)
+}
+
+// Drop any audio file (a Voice Memo, an mp3, a bounce from Logic) onto the
+// window to attach it to the current note. The file is copied into the
+// recordings folder so the note stays self-contained in iCloud.
+function bindAudioDrop() {
+  const AUDIO_EXT = /\.(m4a|mp3|wav|aiff?|aac|caf|webm|ogg)$/i
+  document.addEventListener('dragover', e => e.preventDefault())
+  document.addEventListener('drop', e => {
+    e.preventDefault()
+    const files = Array.from(e.dataTransfer?.files || []).filter(f => AUDIO_EXT.test(f.name))
+    if (!files.length) return
+    const tab = tabs[currentTabIndex]
+    if (!tab || !(tab.mode === 'write' || tab.mode === 'longform')) return
+    const { webUtils } = require('electron')
+    let attached = 0
+    files.forEach(f => {
+      try {
+        const src = webUtils.getPathForFile(f)
+        if (!src) return
+        // Commas separate names in the serialized note — keep them out.
+        const base = path.basename(src).replace(/[,\n]/g, ' ').trim()
+        let name = base
+        let n = 2
+        while (fs.existsSync(path.join(RECORDINGS_DIR, name))) {
+          const dot = base.lastIndexOf('.')
+          name = `${base.slice(0, dot)}-${n++}${base.slice(dot)}`
+        }
+        fs.copyFileSync(src, path.join(RECORDINGS_DIR, name))
+        if (!tab.recordings) tab.recordings = []
+        tab.recordings.push(name)
+        attached++
+      } catch(err) { console.error('[recordings] attach failed:', f.name, err) }
+    })
+    if (!attached) return
+    recordingsOpen = true
+    document.getElementById('recordings-panel').classList.add('open')
+    document.getElementById('rec-toggle').classList.add('active')
+    renderRecordingsPanel()
+    autoSave()
+  })
 }
 
 function addRecordingSlot() {
@@ -1884,6 +1937,15 @@ async function startRecording(index) {
       stream.getTracks().forEach(t => t.stop())
 
       const blob = new Blob(chunks, { type: 'audio/webm' })
+      // A zero-byte capture means the OS delivered a dead stream (mic
+      // permission). Don't save a silent file that "plays" nothing.
+      if (!blob.size) {
+        console.error('[recordings] capture was empty — microphone permission?')
+        activeRecorder = null
+        activeRecorderIndex = -1
+        renderRecordingsPanel()
+        return
+      }
       const filename = `rec-${Date.now()}-${Math.random().toString(36).slice(2,6)}.webm`
       const filepath = path.join(RECORDINGS_DIR, filename)
 
@@ -1924,15 +1986,30 @@ function stopAudio() {
   renderRecordingsPanel()
 }
 
+function mimeForAudio(filename) {
+  if (/\.(m4a|mp4|aac)$/i.test(filename)) return 'audio/mp4'
+  if (/\.mp3$/i.test(filename))           return 'audio/mpeg'
+  if (/\.wav$/i.test(filename))           return 'audio/wav'
+  if (/\.ogg$/i.test(filename))           return 'audio/ogg'
+  return 'audio/webm'
+}
+
 function playRecording(filename, index) {
   const filepath = path.join(RECORDINGS_DIR, filename)
   if (!fs.existsSync(filepath)) return
   stopAudio()
-  currentAudio = new Audio('file://' + filepath)
-  currentPlayingIndex = index
-  currentAudio.onended = () => { currentAudio = null; currentPlayingIndex = -1; renderRecordingsPanel() }
-  currentAudio.play()
-  renderRecordingsPanel()
+  try {
+    // Read + blob instead of a file:// URL — plays regardless of path
+    // quirks, and failures surface instead of dying silently.
+    const blob = new Blob([fs.readFileSync(filepath)], { type: mimeForAudio(filename) })
+    const url = URL.createObjectURL(blob)
+    currentAudio = new Audio(url)
+    currentPlayingIndex = index
+    currentAudio.onended = () => { URL.revokeObjectURL(url); currentAudio = null; currentPlayingIndex = -1; renderRecordingsPanel() }
+    currentAudio.onerror = () => { console.error('[recordings] playback failed:', filename); URL.revokeObjectURL(url); stopAudio() }
+    currentAudio.play().catch(e => { console.error('[recordings] play() failed:', filename, e); stopAudio() })
+    renderRecordingsPanel()
+  } catch(e) { console.error('[recordings] read failed:', filename, e) }
 }
 
 function moveRecording(index, dir) {
@@ -2400,10 +2477,61 @@ function openNote(filename, mode) {
   return true
 }
 
+// ════════════════════════════════════════
+// DAILY PAGE — one note per day, opened each morning to look back
+// ════════════════════════════════════════
+
+const DAILY_TEMPLATE = 'yesterday:\n- \n\nread:\n- \n\n'
+
+function todayDailyTitle(d = new Date()) {
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  return `Daily · ${months[d.getMonth()]} ${d.getDate()}`
+}
+
+function openDailyPage() {
+  const title = todayDailyTitle()
+
+  const openIdx = tabs.findIndex(t => t.mode === 'write' && (t.title || '').trim() === title)
+  if (openIdx !== -1) { newTabMode = 'write'; switchTab(openIdx); renderTabBar(); return }
+
+  for (const filename of getNotesList('write')) {
+    const snap = readFileSnapshot(path.join(WRITE_DIR, filename))
+    if (!snap) continue
+    if ((parseNote(snap.content, 'write').title || '').trim() === title) {
+      openNote(filename, 'write')
+      return
+    }
+  }
+
+  // First open today — fresh tab with the skeleton; the file materializes
+  // on the first save like any other note.
+  clearTimeout(saveTimer)
+  isSwitching = true
+  syncTabFromDOM()
+  persistTab(tabs[currentTabIndex])
+  const tab = emptyTab('write')
+  tab.title = title
+  tab.idea = DAILY_TEMPLATE
+  tabs.push(tab)
+  currentTabIndex = tabs.length - 1
+  newTabMode = 'write'
+  isSwitching = false
+  loadTabIntoDOM(tab)
+  renderTabBar()
+  saveTabPrefs()
+  setTimeout(() => {
+    const area = document.getElementById('idea-area')
+    area.focus()
+    area.selectionStart = area.selectionEnd = 'yesterday:\n- '.length
+  }, 80)
+}
+
 function bindIPC() {
   ipcRenderer.on('load-note', (event, { filename, mode }) => {
     openNote(filename, mode)
   })
+
+  ipcRenderer.on('daily-page', () => openDailyPage())
 
   ipcRenderer.on('new-note', (event, mode) => {
     newTabMode = mode; newTab()
@@ -2618,6 +2746,7 @@ function bindKeys() {
     if (e.key === 'Escape') { closeDrawer(); closeReminder(); hideMarkdownHint(); closeSettings(); closeLibrary() }
     if (e.key === 'f' && e.metaKey) { e.preventDefault(); openSearch() }
     if (e.key === 'l' && e.metaKey) { e.preventDefault(); toggleLibrary() }
+    if (e.key === 'd' && e.metaKey) { e.preventDefault(); openDailyPage() }
     if (e.key === 'w' && e.metaKey) { e.preventDefault(); closeTab(currentTabIndex) }
     if (e.key === 'r' && e.metaKey) { e.preventDefault(); openReminders() }
     if (e.key === 'b' && e.metaKey) { e.preventDefault(); fmtToggle('**') }
@@ -2722,6 +2851,7 @@ function init() {
   bindKeys()
   bindSelection()
   bindIPC()
+  bindAudioDrop()
   startDiskSyncMonitor()
   rescheduleReminders()
   setTimeout(() => history.pruneHistory(), 5000)
