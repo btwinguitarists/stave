@@ -104,6 +104,16 @@
       cursor: pointer;
     }
     #new-note:active { background: var(--accent2); }
+    #today-note {
+      position: fixed; right: 26px; bottom: calc(env(safe-area-inset-bottom) + 100px);
+      height: 40px; padding: 0 20px; border-radius: 20px;
+      background: var(--bg2); color: var(--accent);
+      border: 0.5px solid var(--border2);
+      font-family: inherit; font-size: 13px; letter-spacing: 0.05em;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+      cursor: pointer;
+    }
+    #today-note:active { background: var(--accent); color: #1c1c1e; }
     #sheet-back {
       display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 10;
     }
@@ -144,6 +154,7 @@
       Your first page is waiting.
     </div>
   </div>
+  <button id="today-note" title="Today's page">today</button>
   <button id="new-note" title="New page">+</button>
 
   <div id="note-sheet-back" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:10;" onclick="closeNoteSheet()"></div>

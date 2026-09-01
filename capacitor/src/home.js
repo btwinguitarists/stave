@@ -13,6 +13,22 @@ function noteType(raw) {
   return m ? m[1] : 'write'
 }
 
+// A bare auto-date title ("Thu Aug 13") says nothing in a list — show the
+// first real line of writing instead (same rule as the Mac app).
+const AUTO_DATE_TITLE = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}$/
+
+function displayTitle(title, idea) {
+  const t = (title || '').trim()
+  if (t && t !== 'untitled' && !AUTO_DATE_TITLE.test(t)) return t
+  const line = (idea || '').split('\n').map(l => l.trim())
+    .find(l => l && !/^[-#>*•=~_\[\]() ]+$/.test(l))
+  if (line) {
+    const clean = line.replace(/^#+\s*/, '').replace(/^[-•>]\s*/, '')
+    return clean.length > 42 ? clean.slice(0, 42).trimEnd() + '…' : clean
+  }
+  return t || 'untitled'
+}
+
 function loadNotes() {
   const files = [...StaveFS.list('write'), ...StaveFS.list('longform')]
     .filter(f => f.path.endsWith('.md'))
@@ -24,7 +40,12 @@ function loadNotes() {
     if (mode !== 'write' && mode !== 'longform') return null
     const parsed = C.parseNote(raw, mode)
     const snippet = (parsed.idea || '').split('\n').map(l => l.trim()).filter(Boolean).slice(0, 2).join(' · ')
-    return { path: f.path, mtime: f.mtime, mode, raw, title: parsed.title || 'untitled', idea: parsed.idea || '', snippet }
+    return {
+      path: f.path, mtime: f.mtime, mode, raw,
+      title: parsed.title || 'untitled',
+      display: displayTitle(parsed.title, parsed.idea),
+      idea: parsed.idea || '', snippet
+    }
   }).filter(Boolean)
 }
 
@@ -83,6 +104,34 @@ function newNote() {
   location.href = 'lockin.html'
 }
 
+// ── daily page: one note per day — yesterday's doings + this morning's
+//    Bible reading, reopened all day (same note the Mac's ⌘D opens) ──
+const DAILY_TEMPLATE = 'yesterday:\n- \n\nreading:\n- \n\n'
+
+function todayDailyTitle() {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const d = new Date()
+  return `Daily · ${months[d.getMonth()]} ${d.getDate()}`
+}
+
+function openDailyNote() {
+  const title = todayDailyTitle()
+  const existing = loadNotes().find(n => (n.title || '').trim() === title)
+  if (existing) { openNote(existing); return }
+
+  const now = new Date()
+  const stamp = now.toISOString().slice(0, 16).replace('T', '_').replace(':', '-')
+  const rel = `write/${stamp}.md`
+  const tab = C.emptyTab('write')
+  tab.title = title
+  tab.idea = DAILY_TEMPLATE
+  if (StaveFS.read(rel) === null) StaveFS.write(rel, C.serializeTab(tab))
+  sessionStorage.setItem('stave-open', JSON.stringify({
+    filepath: rel, mode: 'write', title, content: DAILY_TEMPLATE, recordings: []
+  }))
+  location.href = 'lockin.html'
+}
+
 // ── page rows: swipe-left for Export/Delete (the primary iOS gesture),
 //    long-press for the native action sheet as a secondary path ──
 const REVEAL = 160
@@ -99,13 +148,13 @@ async function confirmDelete(n, wrap) {
   if (DL && cap.isNativePlatform && cap.isNativePlatform()) {
     const { value } = await DL.confirm({
       title: 'Delete this page?',
-      message: `“${n.title}” will be gone for good.`,
+      message: `“${n.display}” will be gone for good.`,
       okButtonTitle: 'Delete',
       cancelButtonTitle: 'Cancel'
     })
     go = value
   } else {
-    go = window.confirm(`Delete “${n.title}”? This can’t be undone.`)
+    go = window.confirm(`Delete “${n.display}”? This can’t be undone.`)
   }
   if (!go) { closeOpenRow(); return }
   wrap.style.maxHeight = wrap.offsetHeight + 'px'
@@ -121,7 +170,7 @@ function buildRow(n) {
   const exp = document.createElement('button')
   exp.className = 'swipe-btn export'
   exp.textContent = 'Export'
-  exp.onclick = () => { closeOpenRow(); window.__staveExport(n.title, n.idea) }
+  exp.onclick = () => { closeOpenRow(); window.__staveExport(n.display, n.idea) }
   const del = document.createElement('button')
   del.className = 'swipe-btn delete'
   del.textContent = 'Delete'
@@ -137,7 +186,7 @@ function buildRow(n) {
       <span class="note-date">${fmtDate(n.mtime)}</span>
     </div>
     <div class="note-snippet"></div>`
-  row.querySelector('.note-title').textContent = n.title
+  row.querySelector('.note-title').textContent = n.display
   row.querySelector('.note-snippet').textContent = n.snippet
 
   let startX = 0, startY = 0, dx = 0, horiz = null
@@ -199,7 +248,7 @@ async function openNoteSheet(n) {
   if (AS && DL && cap.isNativePlatform && cap.isNativePlatform()) {
     try {
       const { index } = await AS.showActions({
-        title: n.title,
+        title: n.display,
         options: [
           { title: 'Write' },
           { title: 'Export' },
@@ -208,11 +257,11 @@ async function openNoteSheet(n) {
         ]
       })
       if (index === 0) { openNote(n) }
-      else if (index === 1) { window.__staveExport(n.title, n.idea) }
+      else if (index === 1) { window.__staveExport(n.display, n.idea) }
       else if (index === 2) {
         const { value } = await DL.confirm({
           title: 'Delete this page?',
-          message: `“${n.title}” will be gone for good.`,
+          message: `“${n.display}” will be gone for good.`,
           okButtonTitle: 'Delete',
           cancelButtonTitle: 'Cancel'
         })
@@ -222,7 +271,7 @@ async function openNoteSheet(n) {
     return
   }
   sheetNote = n
-  document.getElementById('note-sheet-title').textContent = n.title.toUpperCase()
+  document.getElementById('note-sheet-title').textContent = n.display.toUpperCase()
   const del = document.getElementById('note-sheet-delete')
   del.textContent = 'Delete'
   del.dataset.armed = ''
@@ -245,7 +294,7 @@ function noteSheetOpen() {
 function noteSheetExport() {
   const n = sheetNote
   closeNoteSheet()
-  if (n) window.__staveExport(n.title, n.idea)
+  if (n) window.__staveExport(n.display, n.idea)
 }
 
 function noteSheetDelete() {
@@ -289,6 +338,7 @@ async function connectFolder() {
 }
 
 document.getElementById('new-note').onclick = newNote
+document.getElementById('today-note').onclick = openDailyNote
 document.getElementById('search').oninput = render
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && StaveFS.ready) StaveFS.init().then(render)
