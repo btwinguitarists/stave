@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/benvanscyoc/stave/capacitor/stave-folder-plugin/.build/index-build/arm64-apple-macosx/debug/StaveFolderPlugin.build/primary.swiftdeps"
+  },
+  "/Users/benvanscyoc/stave/capacitor/stave-folder-plugin/ios/Sources/StaveFolderPlugin/StaveFolderPlugin.swift": {
+    "dependencies": "/Users/benvanscyoc/stave/capacitor/stave-folder-plugin/.build/index-build/arm64-apple-macosx/debug/StaveFolderPlugin.build/StaveFolderPlugin.d",
+    "object": "/Users/benvanscyoc/stave/capacitor/stave-folder-plugin/.build/index-build/arm64-apple-macosx/debug/StaveFolderPlugin.build/StaveFolderPlugin.swift.o",
+    "swiftmodule": "/Users/benvanscyoc/stave/capacitor/stave-folder-plugin/.build/index-build/arm64-apple-macosx/debug/StaveFolderPlugin.build/StaveFolderPlugin~partial.swiftmodule",
+    "swift-dependencies": "/Users/benvanscyoc/stave/capacitor/stave-folder-plugin/.build/index-build/arm64-apple-macosx/debug/StaveFolderPlugin.build/StaveFolderPlugin.swiftdeps",
+    "diagnostics": "/Users/benvanscyoc/stave/capacitor/stave-folder-plugin/.build/index-build/arm64-apple-macosx/debug/StaveFolderPlugin.build/StaveFolderPlugin.dia"
+  }
+}

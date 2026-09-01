@@ -1,0 +1,3 @@
+module StaveFolderPlugin {
+    header "/Users/benvanscyoc/stave/capacitor/stave-folder-plugin/.build/index-build/arm64-apple-macosx/debug/StaveFolderPlugin.build/include/StaveFolderPlugin-Swift.h"
+}

@@ -20,6 +20,7 @@ const LONGFORM_DIR = path.join(NOTES_DIR, 'longform')
 const PROJECTS_DIR = path.join(NOTES_DIR, 'projects')
 const BIBLE_INDEX_PATH  = path.join(__dirname, 'bible-index.json')
 const RECORDINGS_DIR    = path.join(NOTES_DIR, 'recordings')
+const PHOTOS_DIR        = path.join(NOTES_DIR, 'photos')
 const RECORDING_COLORS  = ['#c8922a', '#4caf7d', '#7f77dd', '#378add']
 
 // ── FOREIGN-FILE GUARD ──
@@ -68,7 +69,8 @@ function tabHasContent(tab) {
       (tab.links && tab.links.length)
     )
   }
-  return !!((tab.idea && tab.idea.trim()) || (tab.context && tab.context.trim()))
+  return !!((tab.idea && tab.idea.trim()) || (tab.context && tab.context.trim()) ||
+            (tab.photos && tab.photos.length) || (tab.recordings || []).some(Boolean))
 }
 
 // ── STATE ──
@@ -387,7 +389,7 @@ function emptyTab(mode) {
     mode: mode || newTabMode,
     title: '', idea: '', context: '', tags: [],
     planContext: '', admin: '', tasks: [],
-    phases: [], links: [], recordings: [],
+    phases: [], links: [], recordings: [], photos: [],
     // Disk freshness is part of the tab's save contract. These fields are
     // intentionally not serialized into the note itself.
     lastDiskContent: undefined,
@@ -415,11 +417,13 @@ function getColorForMode(mode) {
 function serializeTab(tab) {
   if (tab.mode === 'write' || tab.mode === 'longform') {
     const recs = (tab.recordings || []).filter(Boolean)
+    const photos = (tab.photos || []).filter(Boolean)
     return [
       `# ${tab.title || 'untitled'}`,
       `type: ${tab.mode}`,
       `tags: ${(tab.tags||[]).join(', ')}`,
       ...(recs.length ? [`recordings: ${recs.join(', ')}`] : []),
+      ...(photos.length ? [`photos: ${photos.join(', ')}`] : []),
       '',
       '## idea',
       tab.idea || '',
@@ -469,7 +473,7 @@ function serializeTab(tab) {
 function parseNote(raw, mode) {
   const lines = raw.split('\n')
   let title = '', idea = '', context = '', admin = '', planContext = ''
-  let tags = [], tasks = [], phases = [], links = [], recordings = []
+  let tags = [], tasks = [], phases = [], links = [], recordings = [], photos = []
   let section = '', currentPhase = null
 
   lines.forEach(line => {
@@ -477,6 +481,7 @@ function parseNote(raw, mode) {
     if (line.startsWith('type: '))       { return }
     if (line.startsWith('tags: '))       { tags = line.slice(6).split(',').map(t=>t.trim()).filter(Boolean); return }
     if (line.startsWith('recordings: ')) { recordings = line.slice(12).split(',').map(r=>r.trim()).filter(Boolean); return }
+    if (line.startsWith('photos: '))     { photos = line.slice(8).split(',').map(p=>p.trim()).filter(Boolean); return }
     if (line.startsWith('context1: '))   { planContext = line.slice(10); return }
     if (line === '## idea')              { section = 'idea'; return }
     if (line === '## context')           { section = 'context'; return }
@@ -535,7 +540,8 @@ function parseNote(raw, mode) {
     tasks,
     phases,
     links,
-    recordings
+    recordings,
+    photos
   }
 }
 
@@ -544,7 +550,7 @@ function parseNote(raw, mode) {
 // ════════════════════════════════════════
 
 function ensureDirs() {
-  [NOTES_DIR, WRITE_DIR, PLAN_DIR, LONGFORM_DIR, PROJECTS_DIR, RECORDINGS_DIR].forEach(d => {
+  [NOTES_DIR, WRITE_DIR, PLAN_DIR, LONGFORM_DIR, PROJECTS_DIR, RECORDINGS_DIR, PHOTOS_DIR].forEach(d => {
     if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
   })
 }
@@ -932,6 +938,7 @@ function loadTabIntoDOM(tab, { focus = true } = {}) {
     document.getElementById('idea-area').value = tab.idea || ''
     document.getElementById('context-area').value = tab.context || ''
     renderTagsFromArray(tab.tags || [])
+    renderPhotoStrip(tab)
     updateSyllableOverlay()
     if (recordingsOpen) renderRecordingsPanel()
     if (focus) setTimeout(() => document.getElementById('idea-area').focus(), 50)
@@ -1865,44 +1872,118 @@ function renderRecordingsPanel() {
   panel.appendChild(inner)
 }
 
-// Drop any audio file (a Voice Memo, an mp3, a bounce from Logic) onto the
-// window to attach it to the current note. The file is copied into the
-// recordings folder so the note stays self-contained in iCloud.
-function bindAudioDrop() {
+// A name that can live on the serialized attachment lines (commas separate
+// entries) and not collide with an existing file in the target folder.
+function claimAttachmentName(dir, srcPath) {
+  const base = path.basename(srcPath).replace(/[,\n]/g, ' ').trim()
+  let name = base
+  let n = 2
+  while (fs.existsSync(path.join(dir, name))) {
+    const dot = base.lastIndexOf('.')
+    name = `${base.slice(0, dot)}-${n++}${base.slice(dot)}`
+  }
+  return name
+}
+
+// Drop audio (a Voice Memo, an mp3) or a photo onto the window to attach it
+// to the current note. Files are copied into the iCloud Stave folder so
+// notes stay self-contained.
+function bindAttachmentDrop() {
   const AUDIO_EXT = /\.(m4a|mp3|wav|aiff?|aac|caf|webm|ogg)$/i
+  const IMAGE_EXT = /\.(jpe?g|png|gif|webp|heic|heif)$/i
   document.addEventListener('dragover', e => e.preventDefault())
   document.addEventListener('drop', e => {
     e.preventDefault()
-    const files = Array.from(e.dataTransfer?.files || []).filter(f => AUDIO_EXT.test(f.name))
-    if (!files.length) return
+    const files = Array.from(e.dataTransfer?.files || [])
+    const audio = files.filter(f => AUDIO_EXT.test(f.name))
+    const images = files.filter(f => IMAGE_EXT.test(f.name))
+    if (!audio.length && !images.length) return
     const tab = tabs[currentTabIndex]
     if (!tab || !(tab.mode === 'write' || tab.mode === 'longform')) return
     const { webUtils } = require('electron')
-    let attached = 0
-    files.forEach(f => {
+
+    let attachedAudio = 0
+    audio.forEach(f => {
       try {
         const src = webUtils.getPathForFile(f)
         if (!src) return
-        // Commas separate names in the serialized note — keep them out.
-        const base = path.basename(src).replace(/[,\n]/g, ' ').trim()
-        let name = base
-        let n = 2
-        while (fs.existsSync(path.join(RECORDINGS_DIR, name))) {
-          const dot = base.lastIndexOf('.')
-          name = `${base.slice(0, dot)}-${n++}${base.slice(dot)}`
-        }
+        const name = claimAttachmentName(RECORDINGS_DIR, src)
         fs.copyFileSync(src, path.join(RECORDINGS_DIR, name))
         if (!tab.recordings) tab.recordings = []
         tab.recordings.push(name)
-        attached++
+        attachedAudio++
       } catch(err) { console.error('[recordings] attach failed:', f.name, err) }
     })
-    if (!attached) return
-    recordingsOpen = true
-    document.getElementById('recordings-panel').classList.add('open')
-    document.getElementById('rec-toggle').classList.add('active')
-    renderRecordingsPanel()
-    autoSave()
+
+    let attachedPhotos = 0
+    images.forEach(f => {
+      try {
+        const src = webUtils.getPathForFile(f)
+        if (!src) return
+        if (/\.heic$|\.heif$/i.test(src)) {
+          // Chromium can't render HEIC — convert on the way in.
+          const name = claimAttachmentName(PHOTOS_DIR, src.replace(/\.heic$|\.heif$/i, '.jpg'))
+          const out = path.join(PHOTOS_DIR, name)
+          require('child_process').execFileSync('sips', ['-s', 'format', 'jpeg', src, '--out', out])
+          if (!tab.photos) tab.photos = []
+          tab.photos.push(name)
+        } else {
+          const name = claimAttachmentName(PHOTOS_DIR, src)
+          fs.copyFileSync(src, path.join(PHOTOS_DIR, name))
+          if (!tab.photos) tab.photos = []
+          tab.photos.push(name)
+        }
+        attachedPhotos++
+      } catch(err) { console.error('[photos] attach failed:', f.name, err) }
+    })
+
+    if (attachedAudio) {
+      recordingsOpen = true
+      document.getElementById('recordings-panel').classList.add('open')
+      document.getElementById('rec-toggle').classList.add('active')
+      renderRecordingsPanel()
+    }
+    if (attachedPhotos) renderPhotoStrip(tab)
+    if (attachedAudio || attachedPhotos) autoSave()
+  })
+}
+
+// ════════════════════════════════════════
+// PHOTOS — a thin strip of thumbnails on the note
+// ════════════════════════════════════════
+
+function renderPhotoStrip(tab) {
+  const strip = document.getElementById('photo-strip')
+  if (!strip) return
+  strip.innerHTML = ''
+  const photos = (tab?.photos || []).filter(Boolean)
+  strip.style.display = photos.length ? 'flex' : 'none'
+  photos.forEach((name, i) => {
+    const cell = document.createElement('div')
+    cell.className = 'photo-cell'
+    const img = document.createElement('img')
+    const filepath = path.join(PHOTOS_DIR, name)
+    if (fs.existsSync(filepath)) {
+      img.src = require('url').pathToFileURL(filepath).href
+      img.title = name
+      img.onclick = () => require('electron').shell.openPath(filepath)
+    } else {
+      img.alt = '…'
+      img.title = `${name} — waiting for iCloud`
+    }
+    const del = document.createElement('button')
+    del.className = 'photo-del'
+    del.textContent = '×'
+    del.title = 'remove from this note (file stays in the photos folder)'
+    del.onclick = ev => {
+      ev.stopPropagation()
+      tab.photos.splice(i, 1)
+      renderPhotoStrip(tab)
+      autoSave()
+    }
+    cell.appendChild(img)
+    cell.appendChild(del)
+    strip.appendChild(cell)
   })
 }
 
@@ -2853,7 +2934,7 @@ function init() {
   bindKeys()
   bindSelection()
   bindIPC()
-  bindAudioDrop()
+  bindAttachmentDrop()
   startDiskSyncMonitor()
   rescheduleReminders()
   setTimeout(() => history.pruneHistory(), 5000)

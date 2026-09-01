@@ -28,6 +28,10 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a photo to attach to the page you are writing.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Attach photos from your library to the page you are writing.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

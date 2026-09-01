@@ -225,6 +225,7 @@
             { title: 'Change room' },
             { title: 'Outline' },
             { title: 'Import text' },
+            { title: 'Add photo' },
             { title: 'Export page' },
             { title: 'Cancel', style: 'CANCEL' }
           ]
@@ -241,7 +242,8 @@
         }
         else if (index === 3) { try { window.toggleOutline() } catch (e) {} }
         else if (index === 4) { if (importBtn) importBtn.click() }
-        else if (index === 5) doExport()
+        else if (index === 5) { try { window.__stavePickPhoto() } catch (e) {} }
+        else if (index === 6) doExport()
       } catch (e) { console.error('[phone] sheet failed:', e) }
     }
     toolbar.appendChild(more)
@@ -276,8 +278,114 @@
   try { payload = JSON.parse(sessionStorage.getItem('stave-open') || 'null') } catch (e) {}
   if (!payload) { location.replace('index.html'); return }
 
+  // ── photos: a thin strip under the title, added from the ⋯ sheet.
+  //    Files live in photos/ beside the notes; the note carries a
+  //    `photos:` header line (same format the Mac app reads). ──
+  const PHOTO_LINE = /^photos: (.*)$/m
+  function notePhotos(raw) {
+    const m = raw.match(PHOTO_LINE)
+    return m ? m[1].split(',').map(s => s.trim()).filter(Boolean) : []
+  }
+  function setNotePhotos(raw, list) {
+    const line = `photos: ${list.join(', ')}`
+    if (PHOTO_LINE.test(raw)) {
+      return list.length ? raw.replace(PHOTO_LINE, line) : raw.replace(/^photos: .*\n?/m, '')
+    }
+    if (!list.length) return raw
+    if (/^tags: .*$/m.test(raw)) return raw.replace(/^(tags: .*)$/m, `$1\n${line}`)
+    return raw.replace(/^(type: .*)$/m, `$1\n${line}`)
+  }
+
+  const photoStrip = document.createElement('div')
+  photoStrip.id = 'ios-photo-strip'
+  photoStrip.style.cssText = 'display:none;gap:8px;overflow-x:auto;margin:6px 0 14px;-webkit-overflow-scrolling:touch;'
+  const docTitle = document.getElementById('doc-title')
+  if (docTitle) docTitle.insertAdjacentElement('afterend', photoStrip)
+
+  function viewPhoto(name, src) {
+    const back = document.createElement('div')
+    back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:600;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;'
+    const big = document.createElement('img')
+    big.src = src
+    big.style.cssText = 'max-width:92vw;max-height:74vh;border-radius:8px;'
+    const remove = document.createElement('button')
+    remove.textContent = 'Remove from this page'
+    remove.style.cssText = 'font-family:inherit;font-size:13px;color:#c0392b;background:transparent;border:0.5px solid #c0392b;border-radius:8px;padding:8px 16px;'
+    let armed = false
+    remove.onclick = e => {
+      e.stopPropagation()
+      if (!armed) { armed = true; remove.textContent = 'Really remove?'; return }
+      const raw = window.StaveFS.read(payload.filepath)
+      if (raw !== null) {
+        window.StaveFS.write(payload.filepath, setNotePhotos(raw, notePhotos(raw).filter(p => p !== name)))
+      }
+      try { document.body.removeChild(back) } catch (err) {}
+      renderPhotoStrip()
+    }
+    back.onclick = () => { try { document.body.removeChild(back) } catch (err) {} }
+    back.appendChild(big)
+    back.appendChild(remove)
+    document.body.appendChild(back)
+  }
+
+  function renderPhotoStrip() {
+    const raw = window.StaveFS.read(payload.filepath)
+    const photos = raw ? notePhotos(raw) : []
+    photoStrip.style.display = photos.length ? 'flex' : 'none'
+    photoStrip.innerHTML = ''
+    const SF = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.StaveFolder
+    photos.forEach(name => {
+      const img = document.createElement('img')
+      img.style.cssText = 'height:52px;width:52px;object-fit:cover;border-radius:6px;border:0.5px solid rgba(255,255,255,0.13);background:#252528;flex-shrink:0;'
+      if (SF && SF.readDataFile) {
+        SF.readDataFile({ path: 'photos/' + name })
+          .then(r => { img.src = 'data:image/jpeg;base64,' + r.data })
+          .catch(() => { img.title = name + ' — waiting for iCloud' })
+      }
+      img.onclick = () => { if (img.src) viewPhoto(name, img.src) }
+      photoStrip.appendChild(img)
+    })
+  }
+
+  const photoInput = document.createElement('input')
+  photoInput.type = 'file'
+  photoInput.accept = 'image/*'
+  photoInput.multiple = true
+  photoInput.style.display = 'none'
+  document.body.appendChild(photoInput)
+  photoInput.onchange = async () => {
+    const SF = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.StaveFolder
+    const files = [...(photoInput.files || [])]
+    photoInput.value = ''
+    if (!SF || !SF.writeDataFile || !files.length) return
+    const added = []
+    for (const f of files.slice(0, 6)) {
+      try {
+        const b64 = await new Promise((res, rej) => {
+          const r = new FileReader()
+          r.onload = () => res(String(r.result).split(',')[1] || '')
+          r.onerror = rej
+          r.readAsDataURL(f)
+        })
+        if (!b64) continue
+        const ext = /png$/i.test(f.type) ? 'png' : 'jpg'
+        const name = `photo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`
+        await SF.writeDataFile({ path: 'photos/' + name, data: b64 })
+        added.push(name)
+      } catch (e) { console.error('[photos] add failed:', e) }
+    }
+    if (!added.length) return
+    const raw = window.StaveFS.read(payload.filepath)
+    if (raw !== null) {
+      window.StaveFS.write(payload.filepath, setNotePhotos(raw, notePhotos(raw).concat(added)))
+    }
+    renderPhotoStrip()
+  }
+  window.__stavePickPhoto = () => photoInput.click()
+
   window.StaveFS.onReady(() => {
     bus.emit('init-lockin', payload)
+    renderPhotoStrip()
     const saved = localStorage.getItem('stave-room')
     if (saved && typeof window.setRoom === 'function') {
       try { window.setRoom(saved) } catch (e) {}

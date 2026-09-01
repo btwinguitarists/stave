@@ -17,7 +17,9 @@ public class StaveFolderPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "writeFile", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "deleteFile", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "pickFolder", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "shareNote", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "shareNote", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "writeDataFile", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "readDataFile", returnType: CAPPluginReturnPromise)
     ]
 
     private let bookmarkKey = "stave-folder-bookmark"
@@ -162,6 +164,70 @@ public class StaveFolderPlugin: CAPPlugin, CAPBridgedPlugin {
                     try? FileManager.default.removeItem(at: delURL)
                 }
                 call.resolve()
+            } catch {
+                call.reject("bad path: \(rel)")
+            }
+        }
+    }
+
+    // MARK: binary files (photo attachments)
+
+    @objc func writeDataFile(_ call: CAPPluginCall) {
+        guard let rel = call.getString("path"), let b64 = call.getString("data"),
+              let data = Data(base64Encoded: b64) else {
+            call.reject("path and base64 data required")
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let url = try self.fileURL(rel)
+                var coordErr: NSError?
+                var writeErr: Error?
+                NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing, error: &coordErr) { writeURL in
+                    do {
+                        try FileManager.default.createDirectory(at: writeURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        try data.write(to: writeURL, options: .atomic)
+                    } catch { writeErr = error }
+                }
+                if let e = coordErr ?? (writeErr as NSError?) {
+                    call.reject("write failed: \(e.localizedDescription)")
+                } else {
+                    call.resolve()
+                }
+            } catch {
+                call.reject("bad path: \(rel)")
+            }
+        }
+    }
+
+    @objc func readDataFile(_ call: CAPPluginCall) {
+        guard let rel = call.getString("path") else {
+            call.reject("path required")
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let url = try self.fileURL(rel)
+                func coordRead() -> Data? {
+                    var result: Data?
+                    var coordErr: NSError?
+                    NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordErr) { readURL in
+                        result = try? Data(contentsOf: readURL)
+                    }
+                    return result
+                }
+                var data = coordRead()
+                if data == nil {
+                    // Possibly an un-downloaded iCloud item: nudge and retry once.
+                    try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+                    Thread.sleep(forTimeInterval: 0.6)
+                    data = coordRead()
+                }
+                if let d = data {
+                    call.resolve(["data": d.base64EncodedString()])
+                } else {
+                    call.reject("read failed: \(rel)")
+                }
             } catch {
                 call.reject("bad path: \(rel)")
             }
