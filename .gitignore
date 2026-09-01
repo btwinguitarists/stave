@@ -6,3 +6,4 @@ lots_of_words.rtf
 *.log
 .DS_Store
 .claude/
+capacitor/stave-folder-plugin/.build/
