@@ -1430,7 +1430,7 @@ function renderScripture(word, container) {
   scriptSection.className = 'drawer-section'
 
   if (!results.length) {
-    scriptSection.innerHTML = `<div class="drawer-label">scripture</div><div class="drawer-loading">"${word}" not found in WEB Bible</div>`
+    scriptSection.innerHTML = `<div class="drawer-label">scripture</div><div class="drawer-loading">"${word}" not found in the BSB</div>`
   } else {
     const header = document.createElement('div')
     header.className = 'drawer-label'
@@ -1477,6 +1477,12 @@ function renderScripture(word, container) {
 
     renderVerses('')
     filterInput.addEventListener('input', () => renderVerses(filterInput.value))
+
+    const credit = document.createElement('div')
+    credit.className = 'drawer-loading'
+    credit.style.marginTop = '8px'
+    credit.textContent = 'Berean Standard Bible'
+    scriptSection.appendChild(credit)
   }
   container.appendChild(scriptSection)
 }
