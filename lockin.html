@@ -1340,6 +1340,28 @@
       saveNoticeTimer = setTimeout(() => el.classList.remove('show'), 6000)
     }
 
+    // @splice-start (extracted verbatim by test/lockin-splice.test.js)
+    // Replace the body of the section that begins at the exact line `marker`
+    // (e.g. '## idea') with `content`, ending at the next exact section
+    // header line — the same rule renderer.js parseNote uses — or at EOF.
+    // Returns null when the marker is absent (caller leaves the file alone).
+    function spliceSection(raw, marker, content) {
+      const SECTION_HEADERS = ['## idea', '## context', '## admin', '## tasks', '## phases', '## links']
+      const lines = raw.split('\n')
+      const start = lines.indexOf(marker)
+      if (start === -1) return null
+      let end = lines.length
+      for (let i = start + 1; i < lines.length; i++) {
+        if (SECTION_HEADERS.includes(lines[i])) { end = i; break }
+      }
+      const body = String(content).trim()
+      const middle = body ? body.split('\n') : []
+      const after = lines.slice(end)
+      // one blank line before the next header, as the serializer writes it
+      return lines.slice(0, start + 1).concat(middle, after.length ? [''].concat(after) : ['']).join('\n')
+    }
+    // @splice-end
+
     function saveNow() {
       if (!currentFilepath) return
       try {
@@ -1361,19 +1383,14 @@
         }
 
         const content = document.getElementById('editor').value
-        let updated
-
-        if (currentMode === 'write' || currentMode === 'longform') {
-          updated = raw.replace(/(## idea\n)([\s\S]*?)(\n## |\n# |$)/,
-            (match, before, old, after) => before + content + '\n' + after)
-          if (!updated.includes(content))
-            updated = raw.replace(/(## idea\n)([\s\S]*)/, '$1' + content + '\n')
-        } else {
-          updated = raw.replace(/(## admin\n)([\s\S]*?)(\n## |\n# |$)/,
-            (match, before, old, after) => before + content + '\n' + after)
-          if (!updated.includes(content))
-            updated = raw.replace(/(## admin\n)([\s\S]*)/, '$1' + content + '\n')
-        }
+        // Splice on the exact section lines the serializer/parser use. The old
+        // lazy regex stopped at the FIRST '## ' or '# ' inside the writing
+        // itself, so any body with a heading ("## Chorus", the sermon dots)
+        // re-emitted the full editor text AND kept the old remainder — the
+        // note grew on every 800 ms save (assessment 2026-09-03, §4.1).
+        const marker = (currentMode === 'write' || currentMode === 'longform') ? '## idea' : '## admin'
+        const spliced = spliceSection(raw, marker, content)
+        const updated = spliced === null ? raw : spliced
 
         // Nothing changed — skip the write so mtimes and iCloud stay quiet.
         if (updated === raw && raw === lastDiskRaw) return
