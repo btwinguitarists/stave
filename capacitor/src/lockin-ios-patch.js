@@ -168,7 +168,10 @@
   }
   window.__twScroll = typewriterScroll
   function applyTypewriter() {
-    const on = localStorage.getItem('stave-typewriter') === 'on'
+    // The centered-caret writing mode is useful on iPad, but on iPhone it
+    // makes a normal note begin halfway down the screen. Never apply it in
+    // the phone layout, even if this installation previously persisted it.
+    const on = localStorage.getItem('stave-typewriter') === 'on' && !phoneQuery.matches
     document.body.classList.toggle('tw-on', on)
     const b = document.getElementById('ios-typewriter')
     if (b) b.classList.toggle('tw-active', on)
@@ -196,6 +199,7 @@
   function applyPhoneMode() {
     // On <html>, not <body>: setRoom() assigns body.className wholesale.
     document.documentElement.classList.toggle('phone', phoneQuery.matches)
+    applyTypewriter()
   }
   phoneQuery.addEventListener('change', applyPhoneMode)
   window.addEventListener('resize', applyPhoneMode, { passive: true })
@@ -213,14 +217,12 @@
       const cap = window.Capacitor
       const AS = cap && cap.Plugins && cap.Plugins.ActionSheet
       const native = AS && cap.isNativePlatform && cap.isNativePlatform()
-      if (!native) { toggleTypewriter(); return }
-      const twOn = localStorage.getItem('stave-typewriter') === 'on'
+      if (!native) { cycleFontSize(); return }
       const size = parseInt(localStorage.getItem('stave-fontsize') || '17', 10) || 17
       try {
         const { index } = await AS.showActions({
           title: 'Writing room',
           options: [
-            { title: (twOn ? '✓ ' : '') + 'Typewriter mode' },
             { title: 'Text size ' + size + ' → bigger' },
             { title: 'Change room' },
             { title: 'Outline' },
@@ -230,9 +232,8 @@
             { title: 'Cancel', style: 'CANCEL' }
           ]
         })
-        if (index === 0) toggleTypewriter()
-        else if (index === 1) cycleFontSize()
-        else if (index === 2) {
+        if (index === 0) cycleFontSize()
+        else if (index === 1) {
           const rooms = ['stave', 'manuscript', 'midnight', 'parchment', 'terminal']
           const r = await AS.showActions({
             title: 'Room',
@@ -240,10 +241,10 @@
           })
           if (r.index < rooms.length && typeof window.setRoom === 'function') window.setRoom(rooms[r.index])
         }
-        else if (index === 3) { try { window.toggleOutline() } catch (e) {} }
-        else if (index === 4) { if (importBtn) importBtn.click() }
-        else if (index === 5) { try { window.__stavePickPhoto() } catch (e) {} }
-        else if (index === 6) doExport()
+        else if (index === 2) { try { window.toggleOutline() } catch (e) {} }
+        else if (index === 3) { if (importBtn) importBtn.click() }
+        else if (index === 4) { try { window.__stavePickPhoto() } catch (e) {} }
+        else if (index === 5) doExport()
       } catch (e) { console.error('[phone] sheet failed:', e) }
     }
     toolbar.appendChild(more)
