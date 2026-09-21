@@ -53,9 +53,45 @@ body { overscroll-behavior: none; }
    gutters. On a phone the words get all of it; the rail becomes a small
    floating cluster bottom-right. (Also applies in narrow iPad split view.) */
 @media (max-width: 700px) {
-  #write-column { padding: 14px 18px 90px; }
+  html, body { height: 100dvh; }
+  #exit-btn { display: none; }
+
+  /* The desktop layout balances a permanently allocated outline rail against
+     the right controls. On a phone that invisible 200px rail pushes the caret
+     into the middle of the screen, so both side tools become overlays. */
+  #outline-sidebar,
+  #drawer-panel {
+    position: fixed;
+    top: calc(env(safe-area-inset-top) + 90px);
+    bottom: 0; left: 0;
+    z-index: 50;
+    width: min(82vw, 320px);
+    background: var(--bg2);
+    opacity: 1;
+    transform: translateX(-102%);
+    transition: transform 0.24s ease;
+    pointer-events: none;
+    border-right: 0.5px solid var(--border2);
+    border-left: none;
+  }
+  #outline-sidebar { padding: 20px 18px calc(env(safe-area-inset-bottom) + 24px); }
+  #outline-sidebar.visible,
+  #drawer-panel.open {
+    width: min(82vw, 320px);
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+  #drawer-inner { min-width: 0; width: 100%; }
+
+  #write-column {
+    align-items: stretch;
+    overflow: hidden;
+    padding: 16px 18px calc(env(safe-area-inset-bottom) + 58px);
+  }
   #doc-title {
-    font-size: 11px; letter-spacing: 0.04em; margin-bottom: 16px;
+    max-width: none;
+    font-size: 11px; letter-spacing: 0.04em; margin-bottom: 12px;
+    text-align: left;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   #right-panel {
@@ -70,7 +106,18 @@ body { overscroll-behavior: none; }
   #fmt-toolbar { padding: 5px 10px; overflow-x: auto; scrollbar-width: none; }
   #fmt-toolbar::-webkit-scrollbar { display: none; }
   #ios-more { margin-left: auto; min-width: 44px; font-size: 18px; }
-  #editor { min-height: calc(100vh - 240px); }
+  #editor {
+    flex: 1;
+    width: 100%; max-width: none;
+    min-height: 0;
+    padding: 0 0 24px;
+    overflow-y: auto;
+  }
+
+  /* A phone note starts at the top like Notes, Drafts, and other everyday
+     editors. Typewriter centering remains available on the roomier iPad. */
+  .phone .tw-on #editor { padding-top: 0; padding-bottom: 24px; }
+  .phone .tw-on #doc-title { margin-bottom: 12px; }
 }
 
 /* Phone: only the mark-making strip stays visible; secondary controls live
