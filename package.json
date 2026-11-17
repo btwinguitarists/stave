@@ -1,10 +1,10 @@
 {
   "name": "stave",
-  "version": "1.1.0",
+  "version": "1.1.3",
   "description": "A minimal note app for creative and admin thinking",
   "main": "main.js",
   "scripts": {
-    "test": "node test/sync-guard.test.js && node test/history.test.js && node test/note-title.test.js && node test/lockin-splice.test.js && node test/ios-phone-layout.test.js",
+    "test": "node test/sync-guard.test.js && node test/history.test.js && node test/note-title.test.js && node test/lockin-splice.test.js && node test/ios-phone-layout.test.js && node test/navigation-policy.test.js",
     "start": "electron .",
     "build": "electron-builder --mac",
     "build:win": "electron-builder --win",
@@ -18,7 +18,15 @@
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
       "icon": "icon.png",
       "fileAssociations": [
         {
@@ -30,7 +38,14 @@
       ]
     },
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "icon.ico"
     },
     "nsis": {
@@ -48,6 +63,7 @@
     },
     "files": [
       "main.js",
+      "navigation-policy.js",
       "index.html",
       "renderer.js",
       "sync-guard.js",
@@ -69,7 +85,7 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
-    "electron": "^41.1.1",
+    "electron": "^45.3.3",
     "electron-builder": "^26.8.1"
   },
   "dependencies": {

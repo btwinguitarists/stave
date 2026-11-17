@@ -19,17 +19,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Regression tests
+        run: npm test
 
       - name: Build .dmg
         run: npx electron-builder --mac --publish never
 
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
+      # The public Mac release is signed and notarized by the local release pipeline.
+      - name: Preserve CI package
+        uses: actions/upload-artifact@v4
         with:
-          files: dist/*.dmg
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: mac-ci-package
+          path: dist/*.dmg

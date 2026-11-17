@@ -1,10 +1,30 @@
-const { app, BrowserWindow, Tray, Menu, MenuItem, globalShortcut, nativeImage, screen, ipcMain, Notification } = require('electron')
+const { app, BrowserWindow, Tray, Menu, MenuItem, globalShortcut, nativeImage, screen, ipcMain, Notification, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
 const nspell = require('nspell')
 const dictionaryEn = require('dictionary-en')
 const { displayTitleFromRaw } = require('./note-title')
+const { classifyNavigation } = require('./navigation-policy')
+
+app.on('web-contents-created', (_event, contents) => {
+  const openExternal = url => {
+    if (classifyNavigation(url, __dirname) === 'external') {
+      shell.openExternal(url).catch(() => {})
+    }
+  }
+  contents.setWindowOpenHandler(({ url }) => {
+    openExternal(url)
+    return { action: 'deny' }
+  })
+  const guardNavigation = (event, url) => {
+    if (classifyNavigation(url, __dirname) === 'local') return
+    event.preventDefault()
+    openExternal(url)
+  }
+  contents.on('will-navigate', guardNavigation)
+  contents.on('will-redirect', guardNavigation)
+})
 
 let speller = null
 dictionaryEn((err, dict) => {
